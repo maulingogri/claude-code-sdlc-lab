@@ -22,6 +22,17 @@ class User(Base):
     # Tracks an in-progress multi-turn post-onboarding conversation (logging a
     # fast, a reflection, or a forgiveness-list entry). None means idle.
     active_flow: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # The specific FastingLog/ForgivenessListEntry row this flow is
+    # attaching a note to — looking up "the user's most recent row"
+    # instead once misattached a note to the wrong record if the user
+    # started a second entry while the first was still mid-flow.
+    active_flow_row_id: Mapped[int | None] = mapped_column(nullable=True)
+    # When active_flow was last set — lets us expire a flow the user
+    # abandoned instead of silently treating an unrelated later message as
+    # its answer indefinitely.
+    active_flow_started_at: Mapped[datetime.datetime | None] = mapped_column(
+        DateTime, nullable=True
+    )
     timezone: Mapped[str] = mapped_column(String(64), default="America/New_York")
     created_at: Mapped[datetime.datetime] = mapped_column(
         DateTime, default=datetime.datetime.utcnow

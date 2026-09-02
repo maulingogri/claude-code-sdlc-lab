@@ -16,6 +16,17 @@ below). Step 6 (admin dashboard) is built and tested (pytest + a manual
 browser pass); not yet used by a real admin day-to-day. Voice support and
 the security pass (rate limiting) are not yet built.
 
+**Also been through a full code-review pass** (10 confirmed findings, all
+fixed — privacy-consent enforcement, a timezone bug, blocking I/O on the
+event loop, a duplicate-send risk, an unhandled crash on a webhook race,
+message-catalog compliance, a silent-failure broadcast bug, a schema-drift
+test gap, missing timeout logging, and a stale-conversation data-integrity
+bug). 15 new regression tests came out of it — see the inline comments
+at each fix site (`app/main.py`, `app/agent_runtime.py`,
+`app/admin/routes.py`, `app/broadcast.py`, `app/personal_features.py`,
+`paryushan-brain/brain/agent.py`, `paryushan-brain/brain/data.py`) for
+the reasoning behind each.
+
 ### Admin dashboard (step 6)
 
 Server-rendered (Jinja2, no frontend framework) at `/admin`, gated by

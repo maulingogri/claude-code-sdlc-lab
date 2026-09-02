@@ -82,8 +82,15 @@ def send_daily_broadcast(session: Session) -> dict[str, int]:
             logger.exception("broadcast_send_failed_group")
             failed += 1
 
-    broadcast.sent_at = datetime.datetime.utcnow()
-    session.commit()
+    if sent > 0:
+        broadcast.sent_at = datetime.datetime.utcnow()
+        session.commit()
+    else:
+        logger.warning(
+            "daily_broadcast_total_failure date=%s failed=%d — not marking as sent",
+            today.isoformat(),
+            failed,
+        )
 
     logger.info("daily_broadcast_complete date=%s sent=%d failed=%d", today.isoformat(), sent, failed)
     return {"sent": sent, "failed": failed, "skipped_no_content": 0}

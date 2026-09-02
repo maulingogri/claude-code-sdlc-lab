@@ -26,6 +26,7 @@ from google.genai import types  # noqa: E402
 from brain.agent import root_agent  # noqa: E402
 
 from app.catalog import get_message  # noqa: E402
+from app.logging_utils import hash_phone, logger  # noqa: E402
 from app.models import User  # noqa: E402
 
 _APP_NAME = "brain"
@@ -63,6 +64,7 @@ async def run_agent_turn(user: User, body: str) -> list[str]:
         "user_id": user.id,
         "language": user.language or "en",
         "personal_features_enabled": user.personal_opt_in,
+        "timezone": user.timezone,
     }
     if session is None:
         await _session_service.create_session(
@@ -76,6 +78,11 @@ async def run_agent_turn(user: User, body: str) -> list[str]:
             _collect_reply(user.phone, session_id, body), timeout=_AGENT_TIMEOUT_SECONDS
         )
     except TimeoutError:
+        logger.warning(
+            "agent_turn_timed_out phone_hash=%s timeout_seconds=%s",
+            hash_phone(user.phone),
+            _AGENT_TIMEOUT_SECONDS,
+        )
         replies = []
 
     return replies or [get_message("agent_error_fallback", user.language or "en")]

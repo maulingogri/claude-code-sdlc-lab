@@ -294,6 +294,7 @@ def test_broadcast_send_marks_sent_and_calls_twilio():
 
             send_response = client.post("/admin/broadcast/send", auth=AUTH, follow_redirects=False)
         assert send_response.status_code == 303
+        assert send_response.headers["location"] == "/admin/broadcast?sent=1&failed=0"
         mock_send.assert_called_once()
         assert mock_send.call_args[0][0] == user.phone
         assert "Compassion" in mock_send.call_args[0][1]
@@ -302,3 +303,40 @@ def test_broadcast_send_marks_sent_and_calls_twilio():
     broadcast = session.query(Broadcast).filter(Broadcast.date == today).one()
     assert broadcast.sent_at is not None
     session.close()
+
+    with TestClient(app) as client:
+        flash_response = client.get("/admin/broadcast?sent=1&failed=0", auth=AUTH)
+        assert "Sent successfully to 1 recipient" in flash_response.text
+        assert 'class="flash flash-error"' not in flash_response.text
+
+
+def test_broadcast_send_total_failure_does_not_mark_sent():
+    today = datetime.date.today()
+    _make_user(broadcast_opt_in=True)
+    session = get_session()
+    session.add(
+        Broadcast(
+            date=today,
+            day_number=1,
+            theme_en="Compassion",
+            theme_gu="કરુણા",
+            pratikraman_timing="7:00 PM",
+        )
+    )
+    session.commit()
+    session.close()
+
+    with patch("app.broadcast.send_whatsapp_message", side_effect=RuntimeError("Twilio down")):
+        with TestClient(app) as client:
+            send_response = client.post("/admin/broadcast/send", auth=AUTH, follow_redirects=False)
+        assert send_response.headers["location"] == "/admin/broadcast?sent=0&failed=1"
+
+    session = get_session()
+    broadcast = session.query(Broadcast).filter(Broadcast.date == today).one()
+    assert broadcast.sent_at is None
+    session.close()
+
+    with TestClient(app) as client:
+        flash_response = client.get("/admin/broadcast?sent=0&failed=1", auth=AUTH)
+        assert "Send failed for all 1 recipient" in flash_response.text
+        assert 'class="flash flash-error"' in flash_response.text

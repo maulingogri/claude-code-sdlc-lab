@@ -59,6 +59,7 @@
     button.secondary:hover { background: #f0f0f0; }
     .flash { background: #eaf4ea; border: 1px solid #c8e0c8; color: #2e7d32;
       padding: 10px 14px; border-radius: 6px; margin-bottom: 16px; font-size: 14px; }
+    .flash.flash-error { background: #fdecea; border-color: #f3c6c0; color: #b8452f; }
     .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; }
     .empty { color: #999; font-size: 14px; padding: 24px; text-align: center; }
   </style>
@@ -74,7 +75,7 @@
     </nav>
   </header>
   <main>
-    {% if flash %}<div class="flash">{{ flash }}</div>{% endif %}
+    {% if flash %}<div class="flash{{ ' flash-error' if flash_type == 'error' else '' }}">{{ flash }}</div>{% endif %}
     {% block content %}{% endblock %}
   </main>
 </body>

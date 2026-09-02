@@ -1,6 +1,8 @@
+import datetime
+
 from app.db import get_session
 from app.models import FastingLog, ForgivenessListEntry, Reflection, User
-from app.personal_features import handle_post_onboarding_message
+from app.personal_features import _FLOW_EXPIRY, handle_post_onboarding_message
 
 
 def _onboarded_user(session, personal_opt_in: bool = True) -> User:
@@ -150,5 +152,67 @@ def test_invalid_menu_choice_reprompts():
         replies = handle_post_onboarding_message(session, user, "xyz")
         assert user.active_flow is None
         assert "didn't understand" in replies[0].lower()
+    finally:
+        session.close()
+
+
+def test_fast_note_attaches_to_the_row_that_started_the_flow():
+    """Regression test: the note step used to look up "the user's most
+    recent FastingLog," so a second, unrelated fast created while the
+    first was still mid-flow would silently steal the note."""
+    session = get_session()
+    try:
+        user = _onboarded_user(session)
+        handle_post_onboarding_message(session, user, "1")
+        handle_post_onboarding_message(session, user, "Upvas")
+        first_log_id = user.active_flow_row_id
+        session.commit()
+
+        # A second, unrelated fast log appears for this user before they
+        # answer the note prompt (e.g. logged some other way).
+        session.add(FastingLog(user_id=user.id, date=datetime.date.today(), fast_type="Ekasana"))
+        session.commit()
+
+        replies = handle_post_onboarding_message(session, user, "Felt peaceful")
+        session.commit()
+
+        assert "Upvas" in replies[0]
+        first_log = session.get(FastingLog, first_log_id)
+        assert first_log.note == "Felt peaceful"
+
+        unrelated_log = (
+            session.query(FastingLog)
+            .filter(FastingLog.user_id == user.id, FastingLog.fast_type == "Ekasana")
+            .one()
+        )
+        assert unrelated_log.note is None
+    finally:
+        session.close()
+
+
+def test_abandoned_flow_expires_instead_of_swallowing_a_later_message():
+    session = get_session()
+    try:
+        user = _onboarded_user(session)
+        handle_post_onboarding_message(session, user, "1")
+        handle_post_onboarding_message(session, user, "Upvas")
+        assert user.active_flow == "fast_note"
+        session.commit()
+
+        # Simulate the user going quiet well past the expiry window, then
+        # sending an unrelated message later.
+        user.active_flow_started_at = datetime.datetime.utcnow() - _FLOW_EXPIRY - datetime.timedelta(minutes=1)
+        session.commit()
+
+        replies = handle_post_onboarding_message(session, user, "2")
+        session.commit()
+
+        # Treated as a fresh menu selection (reflection), not a note on
+        # the abandoned fast log.
+        assert user.active_flow == "reflection_text"
+        assert "reflection" in replies[0].lower()
+
+        log = session.query(FastingLog).filter(FastingLog.user_id == user.id).one()
+        assert log.note is None
     finally:
         session.close()

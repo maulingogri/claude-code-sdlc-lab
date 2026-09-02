@@ -1,8 +1,10 @@
 import datetime
+import time
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import RedirectResponse
 from fastapi.templating import Jinja2Templates
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
 from app.admin.auth import require_admin
@@ -47,6 +49,22 @@ def inbox(request: Request, db: Session = Depends(get_db)):
     )
 
 
+def _commit_with_retry(db: Session, attempts: int = 3, delay_seconds: float = 0.15) -> None:
+    """SQLite can raise 'database is locked' under contention with the ADK
+    agent's independent raw sqlite3 connections (see brain/data.py). A
+    short retry absorbs typical transient contention instead of losing
+    track of a reply that has already been sent to the user."""
+    for attempt in range(1, attempts + 1):
+        try:
+            db.commit()
+            return
+        except OperationalError:
+            db.rollback()
+            if attempt == attempts:
+                raise
+            time.sleep(delay_seconds)
+
+
 @router.post("/inbox/{escalation_id}/reply")
 def reply_to_escalation(
     escalation_id: int, answer_text: str = Form(...), db: Session = Depends(get_db)
@@ -65,7 +83,26 @@ def reply_to_escalation(
 
     escalation.answer_text = answer_text
     escalation.status = "answered"
-    db.commit()
+    try:
+        _commit_with_retry(db)
+    except Exception:
+        # The WhatsApp message already went out — this only failed to
+        # record that in the DB. Retrying the same request would send a
+        # second, duplicate message, so make that explicit rather than
+        # returning a generic 500 that invites a naive retry.
+        logger.exception(
+            "admin_reply_commit_failed_after_send phone_hash=%s escalation_id=%s",
+            hash_phone(escalation.user.phone),
+            escalation_id,
+        )
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                "The reply was already sent to the user via WhatsApp, but saving that to the "
+                "database failed. Do NOT click Send again — that would deliver a duplicate "
+                "message. Check the server logs and update this escalation manually."
+            ),
+        ) from None
     return RedirectResponse(url="/admin/inbox", status_code=303)
 
 
@@ -225,11 +262,36 @@ def user_detail(request: Request, user_id: int, db: Session = Depends(get_db)):
 
 
 @router.get("/broadcast")
-def broadcast_tab(request: Request, db: Session = Depends(get_db)):
+def broadcast_tab(
+    request: Request,
+    sent: int | None = None,
+    failed: int | None = None,
+    db: Session = Depends(get_db),
+):
     today = _today(settings.default_timezone)
     broadcast = db.query(Broadcast).filter(Broadcast.date == today).one_or_none()
 
-    context = {"active_tab": "broadcast", "today": today, "broadcast": broadcast}
+    flash, flash_type = None, None
+    if sent is not None:
+        if sent == 0 and failed:
+            flash = (
+                f"Send failed for all {failed} recipient(s) — nothing was marked as sent. "
+                "Check Twilio credentials and server logs, then try again."
+            )
+            flash_type = "error"
+        elif failed:
+            flash = f"Sent to {sent} recipient(s), but failed for {failed}. Check server logs for details."
+            flash_type = "error"
+        else:
+            flash = f"Sent successfully to {sent} recipient(s)."
+
+    context = {
+        "active_tab": "broadcast",
+        "today": today,
+        "broadcast": broadcast,
+        "flash": flash,
+        "flash_type": flash_type,
+    }
     if broadcast is not None:
         opted_in_count = db.query(User).filter(User.broadcast_opt_in.is_(True)).count()
         context.update(
@@ -244,5 +306,7 @@ def broadcast_tab(request: Request, db: Session = Depends(get_db)):
 
 @router.post("/broadcast/send")
 def broadcast_send(db: Session = Depends(get_db)):
-    send_daily_broadcast(db)
-    return RedirectResponse(url="/admin/broadcast", status_code=303)
+    result = send_daily_broadcast(db)
+    return RedirectResponse(
+        url=f"/admin/broadcast?sent={result['sent']}&failed={result['failed']}", status_code=303
+    )

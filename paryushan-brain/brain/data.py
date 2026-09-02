@@ -11,6 +11,7 @@ import datetime
 import os
 import sqlite3
 from contextlib import contextmanager
+from zoneinfo import ZoneInfo
 
 
 def _db_path() -> str:
@@ -18,6 +19,17 @@ def _db_path() -> str:
     if not url.startswith("sqlite:///"):
         raise RuntimeError(f"brain/data.py only supports sqlite DATABASE_URL, got: {url!r}")
     return url.removeprefix("sqlite:///")
+
+
+def _today_in_tz(tz_name: str) -> datetime.date:
+    # Mirrors app/timeutils.py's today_in_tz — duplicated rather than
+    # imported (see module docstring on why this file avoids importing
+    # `app`), but MUST stay behaviorally identical: a user's fast/
+    # reflection date has to match regardless of which path (this ADK
+    # agent vs. the deterministic menu in app/personal_features.py)
+    # handled the message, or the same log can land under different
+    # calendar dates near a timezone's day boundary.
+    return datetime.datetime.now(ZoneInfo(tz_name)).date()
 
 
 @contextmanager
@@ -30,8 +42,8 @@ def _connection():
         conn.close()
 
 
-def log_fast(user_id: int, fast_type: str, note: str) -> None:
-    today = datetime.date.today().isoformat()
+def log_fast(user_id: int, fast_type: str, note: str, timezone: str = "America/New_York") -> None:
+    today = _today_in_tz(timezone).isoformat()
     with _connection() as conn:
         conn.execute(
             "INSERT INTO fasting_logs (user_id, date, fast_type, note) VALUES (?, ?, ?, ?)",
@@ -39,8 +51,8 @@ def log_fast(user_id: int, fast_type: str, note: str) -> None:
         )
 
 
-def log_reflection(user_id: int, text: str) -> None:
-    today = datetime.date.today().isoformat()
+def log_reflection(user_id: int, text: str, timezone: str = "America/New_York") -> None:
+    today = _today_in_tz(timezone).isoformat()
     with _connection() as conn:
         conn.execute(
             "INSERT INTO reflections (user_id, date, text) VALUES (?, ?, ?)",

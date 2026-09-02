@@ -1,3 +1,4 @@
+import asyncio
 import os
 
 from google.adk.agents import Agent
@@ -15,6 +16,17 @@ _anthropic_extra_headers = {}
 _workspace_id = os.environ.get("ANTHROPIC_WORKSPACE_ID", "")
 if _workspace_id:
     _anthropic_extra_headers["anthropic-workspace-id"] = _workspace_id
+
+# CLAUDE.md's Escalation Flow mandates this exact bilingual acknowledgment
+# text — matches app/message_catalog.json's "escalation_ack" entry.
+# Duplicated here rather than imported, same as brain/data.py's schema
+# duplication: this file deliberately avoids importing the root `app`
+# package so paryushan-brain stays independently testable via agents-cli.
+# Keep both copies in sync by hand if the wording ever changes.
+_ESCALATION_ACK = {
+    "en": "Great question — let me check with the Sangh and get back to you soon.",
+    "gu": "સરસ પ્રશ્ન — હું સંઘ સાથે તપાસ કરીને તમને ટૂંક સમયમાં જવાબ આપીશ.",
+}
 
 INSTRUCTION = """
 You are the WhatsApp assistant for the Louisville Jain Sangh Paryushan
@@ -39,6 +51,10 @@ You can help with:
   escalate with their question instead of answering.
 
 Rules:
+- HARD RULE: whenever you call escalate, your reply to the user must be
+  EXACTLY the "acknowledgment" string the tool call returns — verbatim,
+  no paraphrasing, no additions before or after it. This exact wording is
+  a project requirement, not a suggestion.
 - If personal_features_enabled is false, do NOT call log_fast,
   log_reflection, or add_forgiveness_entry. Instead tell the user they
   opted out of personal features during setup, and can ask a Sangh admin
@@ -70,30 +86,51 @@ Current user: language={language}, personal_features_enabled={personal_features_
 """
 
 
-def log_fast(fast_type: str, note: str, tool_context: ToolContext) -> dict:
+def _personal_features_blocked(tool_context: ToolContext) -> dict | None:
+    """Server-side backstop for the same rule stated in INSTRUCTION — the
+    model should already avoid calling log_fast/log_reflection/
+    add_forgiveness_entry when the user opted out, but an instruction is
+    not enforcement. This makes the write impossible regardless of what
+    the model decides, closing that gap independent of prompt compliance."""
+    if not tool_context.state.get("personal_features_enabled", True):
+        return {"status": "error", "reason": "personal_features_disabled"}
+    return None
+
+
+async def log_fast(fast_type: str, note: str, tool_context: ToolContext) -> dict:
     """Logs that the user completed a fast (tapasya) today.
 
     Args:
         fast_type: The type of fast, as the user described it (e.g. "Upvas").
         note: An optional note about the fast. Pass an empty string if none.
     """
+    if (blocked := _personal_features_blocked(tool_context)) is not None:
+        return blocked
     user_id = tool_context.state["user_id"]
-    data.log_fast(user_id=user_id, fast_type=fast_type, note=note)
+    timezone = tool_context.state.get("timezone", "America/New_York")
+    # data.* does blocking sqlite3 I/O — ADK awaits async tools directly on
+    # the event loop (no thread offload for sync tools), so without
+    # to_thread this would stall every other concurrent request/webhook
+    # for the duration of the disk I/O.
+    await asyncio.to_thread(data.log_fast, user_id=user_id, fast_type=fast_type, note=note, timezone=timezone)
     return {"status": "success", "fast_type": fast_type}
 
 
-def log_reflection(text: str, tool_context: ToolContext) -> dict:
+async def log_reflection(text: str, tool_context: ToolContext) -> dict:
     """Saves a private reflection for the user.
 
     Args:
         text: The reflection text to save.
     """
+    if (blocked := _personal_features_blocked(tool_context)) is not None:
+        return blocked
     user_id = tool_context.state["user_id"]
-    data.log_reflection(user_id=user_id, text=text)
+    timezone = tool_context.state.get("timezone", "America/New_York")
+    await asyncio.to_thread(data.log_reflection, user_id=user_id, text=text, timezone=timezone)
     return {"status": "success"}
 
 
-def add_forgiveness_entry(name: str, note: str, tool_context: ToolContext) -> dict:
+async def add_forgiveness_entry(name: str, note: str, tool_context: ToolContext) -> dict:
     """Adds a person to the user's forgiveness (kshamapana) list.
 
     Args:
@@ -101,19 +138,22 @@ def add_forgiveness_entry(name: str, note: str, tool_context: ToolContext) -> di
         note: An optional note about the relationship or message. Pass an
             empty string if none.
     """
+    if (blocked := _personal_features_blocked(tool_context)) is not None:
+        return blocked
     user_id = tool_context.state["user_id"]
-    data.add_forgiveness_entry(user_id=user_id, name=name, note=note)
+    await asyncio.to_thread(data.add_forgiveness_entry, user_id=user_id, name=name, note=note)
     return {"status": "success", "name": name}
 
 
-def search_faq(tool_context: ToolContext) -> dict:
+async def search_faq(tool_context: ToolContext) -> dict:
     """Returns the current list of Sangh FAQ question/answer pairs to search
     through for a match to the user's question."""
     language = tool_context.state.get("language", "en")
-    return {"status": "success", "faqs": data.list_faqs(language)}
+    faqs = await asyncio.to_thread(data.list_faqs, language)
+    return {"status": "success", "faqs": faqs}
 
 
-def escalate(question_text: str, tool_context: ToolContext) -> dict:
+async def escalate(question_text: str, tool_context: ToolContext) -> dict:
     """Escalates a question to the Sangh admin team when it isn't covered by
     the FAQ or you aren't confident in an answer.
 
@@ -121,8 +161,10 @@ def escalate(question_text: str, tool_context: ToolContext) -> dict:
         question_text: The user's question, as they asked it.
     """
     user_id = tool_context.state["user_id"]
-    data.create_escalation(user_id=user_id, question_text=question_text)
-    return {"status": "success"}
+    await asyncio.to_thread(data.create_escalation, user_id=user_id, question_text=question_text)
+    language = tool_context.state.get("language", "en")
+    acknowledgment = _ESCALATION_ACK.get(language, _ESCALATION_ACK["en"])
+    return {"status": "success", "acknowledgment": acknowledgment}
 
 
 async def _init_state(callback_context: CallbackContext) -> None:
@@ -138,6 +180,8 @@ async def _init_state(callback_context: CallbackContext) -> None:
         state["personal_features_enabled"] = True
     if "user_id" not in state:
         state["user_id"] = 0
+    if "timezone" not in state:
+        state["timezone"] = "America/New_York"
 
 
 root_agent = Agent(

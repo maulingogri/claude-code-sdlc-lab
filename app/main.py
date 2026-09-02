@@ -1,7 +1,10 @@
+import asyncio
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import Response
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
 from twilio.request_validator import RequestValidator
 from twilio.twiml.messaging_response import MessagingResponse
 
@@ -59,6 +62,30 @@ def _strip_whatsapp_prefix(address: str) -> str:
     return address.removeprefix("whatsapp:")
 
 
+def _get_or_create_user(session: Session, phone: str) -> tuple[User, bool]:
+    """Runs in a worker thread via asyncio.to_thread (see twilio_webhook) —
+    plain SQLAlchemy sessions are synchronous, so this blocking DB I/O must
+    be offloaded or it stalls the event loop for every other concurrent
+    request. Returns (user, is_new_user)."""
+    user = session.query(User).filter(User.phone == phone).one_or_none()
+    if user is not None:
+        return user, False
+
+    user = User(phone=phone)
+    session.add(user)
+    try:
+        session.flush()
+    except IntegrityError:
+        # Lost a race with a concurrent request for the same new phone
+        # number (e.g. a duplicate Twilio webhook delivery) — the other
+        # request's insert already went through. Use that row instead of
+        # crashing with an unhandled 500 back to Twilio.
+        session.rollback()
+        user = session.query(User).filter(User.phone == phone).one()
+        return user, False
+    return user, True
+
+
 @app.post("/webhook/twilio")
 async def twilio_webhook(request: Request) -> Response:
     form_raw = await request.form()
@@ -75,12 +102,7 @@ async def twilio_webhook(request: Request) -> Response:
 
     session = get_session()
     try:
-        user = session.query(User).filter(User.phone == phone).one_or_none()
-        is_new_user = user is None
-        if user is None:
-            user = User(phone=phone)
-            session.add(user)
-            session.flush()
+        user, is_new_user = await asyncio.to_thread(_get_or_create_user, session, phone)
 
         logger.info(
             "inbound_message phone_hash=%s onboarding_step=%s is_new=%s",
@@ -104,7 +126,7 @@ async def twilio_webhook(request: Request) -> Response:
         else:
             replies = handle_post_onboarding_message(session, user, body)
 
-        session.commit()
+        await asyncio.to_thread(session.commit)
     finally:
         session.close()
 
