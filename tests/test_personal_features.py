@@ -1,7 +1,7 @@
 import datetime
 
 from app.db import get_session
-from app.models import FastingLog, ForgivenessListEntry, Reflection, User
+from app.models import Dependent, FastingLog, Reflection, User
 from app.personal_features import _FLOW_EXPIRY, handle_post_onboarding_message
 
 
@@ -23,6 +23,24 @@ def test_personal_features_off_notice_when_opted_out():
         user = _onboarded_user(session, personal_opt_in=False)
         replies = handle_post_onboarding_message(session, user, "1")
         assert "opted out" in replies[0].lower()
+    finally:
+        session.close()
+
+
+def test_menu_and_vow_toggle_work_even_when_opted_out():
+    """Personal features (fast/reflection/family logging) require opt-in,
+    but seeing the menu and toggling the vow don't — the vow isn't the
+    same kind of personal data."""
+    session = get_session()
+    try:
+        user = _onboarded_user(session, personal_opt_in=False)
+
+        menu_replies = handle_post_onboarding_message(session, user, "menu")
+        assert "log a fast" in menu_replies[0].lower()
+
+        vow_replies = handle_post_onboarding_message(session, user, "4")
+        assert user.vow_opt_in is True
+        assert "vow" in vow_replies[0].lower()
     finally:
         session.close()
 
@@ -68,6 +86,7 @@ def test_log_fast_flow_with_note():
         log = session.query(FastingLog).filter(FastingLog.user_id == user.id).one()
         assert log.fast_type == "Upvas"
         assert log.note == "Felt peaceful today"
+        assert log.dependent_id is None
     finally:
         session.close()
 
@@ -106,27 +125,80 @@ def test_log_reflection_flow():
         session.close()
 
 
-def test_log_forgiveness_flow_with_note():
+def test_family_member_fast_flow_with_note():
     session = get_session()
     try:
         user = _onboarded_user(session)
         handle_post_onboarding_message(session, user, "3")
-        assert user.active_flow == "forgiveness_name"
+        assert user.active_flow == "family_name"
 
-        handle_post_onboarding_message(session, user, "Rina Shah")
-        assert user.active_flow == "forgiveness_note"
+        handle_post_onboarding_message(session, user, "Grandma Shah")
+        assert user.active_flow == "family_action"
 
-        replies = handle_post_onboarding_message(session, user, "A close friend, lost touch this year")
+        handle_post_onboarding_message(session, user, "1")  # fast
+        assert user.active_flow == "family_fast_type"
+
+        handle_post_onboarding_message(session, user, "Upvas")
+        assert user.active_flow == "family_fast_note"
+
+        replies = handle_post_onboarding_message(session, user, "Felt strong")
         session.commit()
 
         assert user.active_flow is None
-        assert "Rina Shah" in replies[0]
+        assert "Grandma Shah" in replies[0]
+        assert "Upvas" in replies[0]
 
-        entry = (
-            session.query(ForgivenessListEntry).filter(ForgivenessListEntry.user_id == user.id).one()
-        )
-        assert entry.name == "Rina Shah"
-        assert entry.relationship_note == "A close friend, lost touch this year"
+        dependent = session.query(Dependent).filter(Dependent.guardian_id == user.id).one()
+        assert dependent.name == "Grandma Shah"
+        log = session.query(FastingLog).filter(FastingLog.dependent_id == dependent.id).one()
+        assert log.user_id == user.id
+        assert log.fast_type == "Upvas"
+        assert log.note == "Felt strong"
+    finally:
+        session.close()
+
+
+def test_family_member_reflection_flow():
+    session = get_session()
+    try:
+        user = _onboarded_user(session)
+        handle_post_onboarding_message(session, user, "3")
+        handle_post_onboarding_message(session, user, "Little Priya")
+        handle_post_onboarding_message(session, user, "2")  # reflection
+        assert user.active_flow == "family_reflection_text"
+
+        replies = handle_post_onboarding_message(session, user, "Priya enjoyed the story today.")
+        session.commit()
+
+        assert "Little Priya" in replies[0]
+        dependent = session.query(Dependent).filter(Dependent.guardian_id == user.id).one()
+        reflection = session.query(Reflection).filter(Reflection.dependent_id == dependent.id).one()
+        assert reflection.text == "Priya enjoyed the story today."
+    finally:
+        session.close()
+
+
+def test_family_member_reuses_existing_dependent_by_name():
+    session = get_session()
+    try:
+        user = _onboarded_user(session)
+        handle_post_onboarding_message(session, user, "3")
+        handle_post_onboarding_message(session, user, "Grandma Shah")
+        handle_post_onboarding_message(session, user, "1")
+        handle_post_onboarding_message(session, user, "Upvas")
+        handle_post_onboarding_message(session, user, "skip")
+        session.commit()
+
+        # Log a second entry for the same family member — should reuse
+        # the same Dependent row, not create a second one.
+        handle_post_onboarding_message(session, user, "3")
+        handle_post_onboarding_message(session, user, "Grandma Shah")
+        handle_post_onboarding_message(session, user, "2")
+        handle_post_onboarding_message(session, user, "A quiet, peaceful day.")
+        session.commit()
+
+        dependents = session.query(Dependent).filter(Dependent.guardian_id == user.id).all()
+        assert len(dependents) == 1
     finally:
         session.close()
 

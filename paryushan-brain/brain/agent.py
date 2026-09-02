@@ -17,16 +17,14 @@ _workspace_id = os.environ.get("ANTHROPIC_WORKSPACE_ID", "")
 if _workspace_id:
     _anthropic_extra_headers["anthropic-workspace-id"] = _workspace_id
 
-# CLAUDE.md's Escalation Flow mandates this exact bilingual acknowledgment
-# text — matches app/message_catalog.json's "escalation_ack" entry.
-# Duplicated here rather than imported, same as brain/data.py's schema
-# duplication: this file deliberately avoids importing the root `app`
-# package so paryushan-brain stays independently testable via agents-cli.
-# Keep both copies in sync by hand if the wording ever changes.
-_ESCALATION_ACK = {
-    "en": "Great question — let me check with the Sangh and get back to you soon.",
-    "gu": "સરસ પ્રશ્ન — હું સંઘ સાથે તપાસ કરીને તમને ટૂંક સમયમાં જવાબ આપીશ.",
-}
+# CLAUDE.md's Escalation Flow mandates this exact acknowledgment text —
+# matches app/message_catalog.json's "escalation_ack" entry. The English
+# is duplicated here rather than imported (this file deliberately avoids
+# importing the root `app` package so paryushan-brain stays independently
+# testable via agents-cli); Gujarati is produced via data.translate_to_gujarati,
+# which shares app/translation.py's DB cache so both halves of the app
+# always agree on the translation.
+_ESCALATION_ACK_EN = "Great question — let me check with the Sangh and get back to you soon."
 
 INSTRUCTION = """
 You are the WhatsApp assistant for the Louisville Jain Sangh Paryushan
@@ -38,12 +36,16 @@ this is WhatsApp.
 You can help with:
 - Logging a fast (tapasya): call log_fast with the fast type they describe
   (e.g. Upvas, Ekasana, Biyasana, Ayambil) and any note they gave (pass an
-  empty string if they gave no note).
-- Saving a private reflection: call log_reflection with their reflection
-  text.
-- Adding someone to their forgiveness list (kshamapana): call
-  add_forgiveness_entry with the name and an optional note (empty string if
-  none given).
+  empty string if they gave no note). If they're logging it for a family
+  member (a young child, elder, or anyone who doesn't message you
+  directly) rather than themselves, pass that person's name in for_whom;
+  otherwise pass an empty string for for_whom.
+- Saving a private reflection: call log_reflection the same way — with
+  for_whom set to a family member's name if it's not the user's own
+  reflection.
+- Turning the daily vow on or off: call toggle_vow_opt_in with true to
+  turn it on, false to turn it off, whenever the user asks to start or
+  stop receiving a daily vow.
 - Answering questions about Paryushan or Sangh logistics: call search_faq
   to see the current FAQ list, then answer using only that matched content
   if there's a clear match.
@@ -55,10 +57,10 @@ Rules:
   EXACTLY the "acknowledgment" string the tool call returns — verbatim,
   no paraphrasing, no additions before or after it. This exact wording is
   a project requirement, not a suggestion.
-- If personal_features_enabled is false, do NOT call log_fast,
-  log_reflection, or add_forgiveness_entry. Instead tell the user they
-  opted out of personal features during setup, and can ask a Sangh admin
-  to turn them on.
+- If personal_features_enabled is false, do NOT call log_fast or
+  log_reflection (for the user or for a family member). Instead tell them
+  they opted out of personal features during setup, and can ask a Sangh
+  admin to turn them on.
 - Only call a logging tool when the user's intent to record something is
   clearly there. If it's ambiguous, ask one brief clarifying question
   first instead of guessing.
@@ -88,61 +90,83 @@ Current user: language={language}, personal_features_enabled={personal_features_
 
 def _personal_features_blocked(tool_context: ToolContext) -> dict | None:
     """Server-side backstop for the same rule stated in INSTRUCTION — the
-    model should already avoid calling log_fast/log_reflection/
-    add_forgiveness_entry when the user opted out, but an instruction is
-    not enforcement. This makes the write impossible regardless of what
-    the model decides, closing that gap independent of prompt compliance."""
+    model should already avoid calling log_fast/log_reflection when the
+    user opted out, but an instruction is not enforcement. This makes the
+    write impossible regardless of what the model decides, closing that
+    gap independent of prompt compliance."""
     if not tool_context.state.get("personal_features_enabled", True):
         return {"status": "error", "reason": "personal_features_disabled"}
     return None
 
 
-async def log_fast(fast_type: str, note: str, tool_context: ToolContext) -> dict:
-    """Logs that the user completed a fast (tapasya) today.
+async def _resolve_dependent_id(tool_context: ToolContext, for_whom: str) -> int | None:
+    if not for_whom:
+        return None
+    user_id = tool_context.state["user_id"]
+    return await asyncio.to_thread(data.get_or_create_dependent, user_id, for_whom)
+
+
+async def log_fast(fast_type: str, note: str, for_whom: str, tool_context: ToolContext) -> dict:
+    """Logs a completed fast (tapasya) today, for the user or a family member.
 
     Args:
-        fast_type: The type of fast, as the user described it (e.g. "Upvas").
+        fast_type: The type of fast, as described (e.g. "Upvas").
         note: An optional note about the fast. Pass an empty string if none.
+        for_whom: A family member's name if this fast is for them, not the
+            user. Pass an empty string if it's the user's own fast.
     """
     if (blocked := _personal_features_blocked(tool_context)) is not None:
         return blocked
     user_id = tool_context.state["user_id"]
     timezone = tool_context.state.get("timezone", "America/New_York")
+    dependent_id = await _resolve_dependent_id(tool_context, for_whom)
     # data.* does blocking sqlite3 I/O — ADK awaits async tools directly on
     # the event loop (no thread offload for sync tools), so without
     # to_thread this would stall every other concurrent request/webhook
     # for the duration of the disk I/O.
-    await asyncio.to_thread(data.log_fast, user_id=user_id, fast_type=fast_type, note=note, timezone=timezone)
-    return {"status": "success", "fast_type": fast_type}
+    await asyncio.to_thread(
+        data.log_fast,
+        user_id=user_id,
+        fast_type=fast_type,
+        note=note,
+        timezone=timezone,
+        dependent_id=dependent_id,
+    )
+    return {"status": "success", "fast_type": fast_type, "for_whom": for_whom or "self"}
 
 
-async def log_reflection(text: str, tool_context: ToolContext) -> dict:
-    """Saves a private reflection for the user.
+async def log_reflection(text: str, for_whom: str, tool_context: ToolContext) -> dict:
+    """Saves a private reflection for the user or a family member.
 
     Args:
         text: The reflection text to save.
+        for_whom: A family member's name if this reflection is for them,
+            not the user. Pass an empty string if it's the user's own.
     """
     if (blocked := _personal_features_blocked(tool_context)) is not None:
         return blocked
     user_id = tool_context.state["user_id"]
     timezone = tool_context.state.get("timezone", "America/New_York")
-    await asyncio.to_thread(data.log_reflection, user_id=user_id, text=text, timezone=timezone)
+    dependent_id = await _resolve_dependent_id(tool_context, for_whom)
+    await asyncio.to_thread(
+        data.log_reflection,
+        user_id=user_id,
+        text=text,
+        timezone=timezone,
+        dependent_id=dependent_id,
+    )
     return {"status": "success"}
 
 
-async def add_forgiveness_entry(name: str, note: str, tool_context: ToolContext) -> dict:
-    """Adds a person to the user's forgiveness (kshamapana) list.
+async def toggle_vow_opt_in(opt_in: bool, tool_context: ToolContext) -> dict:
+    """Turns the daily Jain-principle vow on or off for the user.
 
     Args:
-        name: The name of the person to add.
-        note: An optional note about the relationship or message. Pass an
-            empty string if none.
+        opt_in: True to start sending a daily vow, False to stop.
     """
-    if (blocked := _personal_features_blocked(tool_context)) is not None:
-        return blocked
     user_id = tool_context.state["user_id"]
-    await asyncio.to_thread(data.add_forgiveness_entry, user_id=user_id, name=name, note=note)
-    return {"status": "success", "name": name}
+    await asyncio.to_thread(data.set_vow_opt_in, user_id, opt_in)
+    return {"status": "success", "opt_in": opt_in}
 
 
 async def search_faq(tool_context: ToolContext) -> dict:
@@ -163,7 +187,11 @@ async def escalate(question_text: str, tool_context: ToolContext) -> dict:
     user_id = tool_context.state["user_id"]
     await asyncio.to_thread(data.create_escalation, user_id=user_id, question_text=question_text)
     language = tool_context.state.get("language", "en")
-    acknowledgment = _ESCALATION_ACK.get(language, _ESCALATION_ACK["en"])
+    acknowledgment = (
+        await asyncio.to_thread(data.translate_to_gujarati, _ESCALATION_ACK_EN)
+        if language == "gu"
+        else _ESCALATION_ACK_EN
+    )
     return {"status": "success", "acknowledgment": acknowledgment}
 
 
@@ -190,7 +218,7 @@ root_agent = Agent(
         model="anthropic/claude-haiku-4-5-20251001", extra_headers=_anthropic_extra_headers or None
     ),
     instruction=INSTRUCTION,
-    tools=[log_fast, log_reflection, add_forgiveness_entry, search_faq, escalate],
+    tools=[log_fast, log_reflection, toggle_vow_opt_in, search_faq, escalate],
     before_agent_callback=_init_state,
 )
 

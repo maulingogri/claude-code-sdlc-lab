@@ -55,6 +55,22 @@ def test_full_onboarding_conversation_via_webhook():
         assert "fast logged for today (upvas)" in xml.lower()
 
 
+def test_rate_limit_silently_drops_messages_beyond_the_threshold():
+    with TestClient(app) as client:
+        for _ in range(15):
+            xml = _send(client, "hi")
+        assert "<Message>" in xml  # the 15th still gets a normal reply
+
+        response = client.post("/webhook/twilio", data={"From": PHONE, "Body": "hi"})
+        assert response.status_code == 200
+        assert "<Message>" not in response.text  # silently dropped, no reply
+
+        # A different phone number is unaffected.
+        other_phone = "whatsapp:+15559990000"
+        response = client.post("/webhook/twilio", data={"From": other_phone, "Body": "hi"})
+        assert "<Message>" in response.text
+
+
 def test_rejects_request_with_bad_signature_when_validation_enabled(monkeypatch):
     from app.config import settings
 

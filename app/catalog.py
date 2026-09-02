@@ -2,6 +2,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+from app.translation import translate_to_gujarati
+
 _CATALOG_PATH = Path(__file__).parent / "message_catalog.json"
 
 with open(_CATALOG_PATH, encoding="utf-8") as f:
@@ -9,18 +11,22 @@ with open(_CATALOG_PATH, encoding="utf-8") as f:
 
 
 def get_message(message_id: str, language: str, **kwargs: Any) -> str:
-    """Look up a catalog entry by id and language, then fill in template values.
+    """Look up a catalog entry by id, fill in template values, then
+    translate to Gujarati if needed (see app/translation.py).
 
-    `language` should be "en" or "gu". Falls back to "en" if the requested
-    language is missing for that id (should not happen once the catalog is
-    complete, but keeps onboarding from breaking on a partial entry).
+    Formatting happens BEFORE translation, not after — translating a
+    template like "Day {day_number} of 8" risks the API mangling the
+    `{...}` placeholder syntax itself.
     """
     entry = _CATALOG.get(message_id)
     if entry is None:
         raise KeyError(f"Unknown message catalog id: {message_id!r}")
 
-    template = entry.get(language) or entry.get("en")
+    template = entry.get("en")
     if template is None:
-        raise KeyError(f"No '{language}' or 'en' text for message id: {message_id!r}")
+        raise KeyError(f"No 'en' text for message id: {message_id!r}")
 
-    return template.format(**kwargs)
+    text = template.format(**kwargs)
+    if language == "gu":
+        return translate_to_gujarati(text)
+    return text

@@ -38,10 +38,12 @@ broadcasts with personal features, plus an admin dashboard.
   local Pratikraman timing, announcements, and — for users who opted in
   to public recognition — a list of names who fasted the previous day
 - Free-form replies anytime within the 24h window:
-  - Log a fast (type + optional note)
-  - Add a private reflection
+  - Log a fast (type + optional note) — for yourself or a family member
+    (young child, elder, etc.) who doesn't message the bot directly
+  - Add a private reflection — for yourself or a family member
   - Ask a question (routed to FAQ match or escalation)
-  - RSVP to an event
+  - Opt in/out of a daily Jain-principle vow (admin-approved pool; never
+    repeats for the same person while unused approved vows remain)
 - Optional evening nudge to log fast/reflection
 
 ## Escalation Flow (Q&A the bot can't answer)
@@ -70,16 +72,28 @@ Scope is the 8-day Paryushan period, ending at Samvatsari. Do not add
 ```
 users
   id, phone, language (en/gu), broadcast_opt_in, personal_opt_in,
-  public_recognition_optin, onboarding_step, timezone
+  public_recognition_optin, vow_opt_in, onboarding_step, timezone
+
+dependents
+  id, guardian_id, name — a family member (young child, elder, etc.) who
+  doesn't message the bot directly; their guardian logs on their behalf.
+  Recognition visibility follows the guardian's own opt-in, since a
+  dependent can't consent for themselves.
 
 fasting_logs
-  id, user_id, date, fast_type, note
+  id, user_id, dependent_id (nullable — set when logged for a family
+  member instead of the user), date, fast_type, note
 
 reflections
-  id, user_id, date, text
+  id, user_id, dependent_id (nullable, same as above), date, text
 
-forgiveness_list
-  id, user_id, name, relationship_note
+vows
+  id, text_en, text_gu, approved (bool) — candidate Jain-principle daily
+  vows; nothing is sent to a user until an admin approves it
+
+vow_assignments
+  id, user_id, vow_id, date — which vow went to whom on which day, so the
+  same vow never repeats for one person while unused approved vows remain
 
 escalations
   id, user_id, question_text, status (pending/answered), answer_text,
@@ -92,22 +106,28 @@ broadcasts
   id, date, theme, message_id, sent_at
 ```
 
-## Message Catalog
-Bilingual (en/gu) strings live in `message_catalog.json`, keyed by message
-ID (e.g. `greeting`, `ask_language`, `escalation_ack`,
-`daily_broadcast_intro`). Never hardcode user-facing strings directly in
-application logic — always add a new key to the catalog and reference it
-by ID. Dynamic values (day number, theme) are injected via simple
-templating.
+## Message Catalog & Translation
+English strings live in `message_catalog.json`, keyed by message ID (e.g.
+`greeting`, `ask_language`, `escalation_ack`, `daily_broadcast_intro`).
+Never hardcode user-facing strings directly in application logic — always
+add a new key to the catalog and reference it by ID. Dynamic values (day
+number, theme) are injected via simple templating, filled in *before*
+translation.
+
+Gujarati is generated via the Google Cloud Translation API at send time
+(cached in `translation_cache` so repeated strings are only translated
+once) rather than hand-written per catalog entry — this applies broadly,
+including admin-authored ad-hoc content (custom group messages, vow
+candidates): admins write English, Gujarati is auto-drafted.
 
 ## Admin Dashboard
 
 | Tab | Purpose |
 |---|---|
 | **Inbox** | Unanswered/escalated questions, reply box, "Add to FAQ" flag |
-| **Content** | Edit daily broadcasts, Sangh directions/logistics, FAQ entries (bilingual side-by-side fields) |
-| **Users** | List of users (language, opt-ins); drill into individual fasting logs & reflections |
-| **Broadcast** | Preview and trigger/schedule the next daily message in both languages |
+| **Content** | Edit daily broadcasts, Sangh directions/logistics, FAQ entries, and the daily-vow pool (admin approval required before a vow goes to any user) |
+| **Users** | List of users (language, opt-ins); drill into individual fasting logs, reflections, and logged-for family members |
+| **Broadcast** | Preview and trigger/schedule the next daily message; also send a one-off custom message to the Sangh WhatsApp group |
 
 - Auth-gated with a single shared admin login (no per-admin accounts)
 - No public route should ever expose user data
@@ -117,7 +137,7 @@ templating.
   commit credentials
 - Webhook must validate Twilio request signatures
 - Application/server logs record event types and hashed phone numbers —
-  never log raw message content (reflections, forgiveness lists)
+  never log raw message content (reflections, custom group messages)
 - Basic per-user rate limiting on the webhook
 - The admin dashboard is the *intended* place personal data is visible —
   this is a deliberate design choice, disclosed to users, not a logging
@@ -150,7 +170,7 @@ templating.
 1. Data model + onboarding state machine → test via Twilio sandbox
 2. Bilingual message catalog wired in
 3. Daily broadcast cron job
-4. Personal features: fasting log, reflections, forgiveness list
+4. Personal features: fasting log, reflections (self or family member), daily vow opt-in
 5. Escalation flow (ack → dashboard inbox → admin reply → FAQ save)
 6. Admin dashboard: Inbox → Content → Users → Broadcast tabs
 7. Security pass: signature validation, rate limiting, log hygiene review

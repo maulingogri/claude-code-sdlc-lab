@@ -10,12 +10,12 @@ that must hold regardless of what the LLM decides to do.
 import datetime
 from zoneinfo import ZoneInfo
 
-from brain.agent import add_forgiveness_entry, escalate, log_fast, log_reflection
+from brain.agent import escalate, log_fast, log_reflection, toggle_vow_opt_in
 from brain.data import _today_in_tz
 
 from app.catalog import get_message
 from app.db import get_session
-from app.models import FastingLog, ForgivenessListEntry, Reflection, User
+from app.models import Dependent, FastingLog, Reflection, User
 
 
 class _FakeToolContext:
@@ -39,7 +39,7 @@ async def test_log_fast_blocked_when_personal_features_disabled():
     user = _make_user(personal_opt_in=False)
     ctx = _FakeToolContext({"user_id": user.id, "personal_features_enabled": False})
 
-    result = await log_fast("Upvas", "trying anyway", ctx)
+    result = await log_fast("Upvas", "trying anyway", "", ctx)
 
     assert result == {"status": "error", "reason": "personal_features_disabled"}
     session = get_session()
@@ -51,7 +51,7 @@ async def test_log_reflection_blocked_when_personal_features_disabled():
     user = _make_user(personal_opt_in=False)
     ctx = _FakeToolContext({"user_id": user.id, "personal_features_enabled": False})
 
-    result = await log_reflection("trying anyway", ctx)
+    result = await log_reflection("trying anyway", "", ctx)
 
     assert result == {"status": "error", "reason": "personal_features_disabled"}
     session = get_session()
@@ -59,29 +59,62 @@ async def test_log_reflection_blocked_when_personal_features_disabled():
     session.close()
 
 
-async def test_add_forgiveness_entry_blocked_when_personal_features_disabled():
-    user = _make_user(personal_opt_in=False)
-    ctx = _FakeToolContext({"user_id": user.id, "personal_features_enabled": False})
-
-    result = await add_forgiveness_entry("Someone", "", ctx)
-
-    assert result == {"status": "error", "reason": "personal_features_disabled"}
-    session = get_session()
-    assert session.query(ForgivenessListEntry).filter(ForgivenessListEntry.user_id == user.id).count() == 0
-    session.close()
-
-
 async def test_log_fast_allowed_when_personal_features_enabled():
     user = _make_user(personal_opt_in=True)
     ctx = _FakeToolContext({"user_id": user.id, "personal_features_enabled": True})
 
-    result = await log_fast("Ekasana", "felt good", ctx)
+    result = await log_fast("Ekasana", "felt good", "", ctx)
 
-    assert result == {"status": "success", "fast_type": "Ekasana"}
+    assert result == {"status": "success", "fast_type": "Ekasana", "for_whom": "self"}
     session = get_session()
     log = session.query(FastingLog).filter(FastingLog.user_id == user.id).one()
     assert log.fast_type == "Ekasana"
     assert log.note == "felt good"
+    assert log.dependent_id is None
+    session.close()
+
+
+async def test_log_fast_for_family_member_creates_dependent():
+    user = _make_user(personal_opt_in=True)
+    ctx = _FakeToolContext({"user_id": user.id, "personal_features_enabled": True})
+
+    result = await log_fast("Upvas", "", "Grandma Shah", ctx)
+
+    assert result == {"status": "success", "fast_type": "Upvas", "for_whom": "Grandma Shah"}
+    session = get_session()
+    dependent = session.query(Dependent).filter(Dependent.guardian_id == user.id).one()
+    assert dependent.name == "Grandma Shah"
+    log = session.query(FastingLog).filter(FastingLog.dependent_id == dependent.id).one()
+    assert log.user_id == user.id
+    assert log.fast_type == "Upvas"
+    session.close()
+
+
+async def test_log_reflection_for_family_member_creates_dependent():
+    user = _make_user(personal_opt_in=True)
+    ctx = _FakeToolContext({"user_id": user.id, "personal_features_enabled": True})
+
+    result = await log_reflection("Enjoyed the story today.", "Little Priya", ctx)
+
+    assert result == {"status": "success"}
+    session = get_session()
+    dependent = session.query(Dependent).filter(Dependent.guardian_id == user.id).one()
+    assert dependent.name == "Little Priya"
+    reflection = session.query(Reflection).filter(Reflection.dependent_id == dependent.id).one()
+    assert reflection.text == "Enjoyed the story today."
+    session.close()
+
+
+async def test_toggle_vow_opt_in_updates_user():
+    user = _make_user(personal_opt_in=True)
+    ctx = _FakeToolContext({"user_id": user.id})
+
+    result = await toggle_vow_opt_in(True, ctx)
+
+    assert result == {"status": "success", "opt_in": True}
+    session = get_session()
+    refreshed = session.get(User, user.id)
+    assert refreshed.vow_opt_in is True
     session.close()
 
 
@@ -99,7 +132,7 @@ async def test_log_fast_uses_passed_timezone_not_server_clock():
         {"user_id": user.id, "personal_features_enabled": True, "timezone": "Pacific/Kiritimati"}
     )
 
-    await log_fast("Upvas", "", ctx)
+    await log_fast("Upvas", "", "", ctx)
 
     session = get_session()
     log = session.query(FastingLog).filter(FastingLog.user_id == user.id).one()
@@ -108,9 +141,11 @@ async def test_log_fast_uses_passed_timezone_not_server_clock():
 
 
 async def test_escalate_acknowledgment_matches_message_catalog():
-    # brain/agent.py duplicates this string rather than importing
-    # app.catalog (see the module's own comment on why) — this test is
-    # the drift detector: it fails the moment the two copies disagree.
+    # brain/agent.py duplicates the English string rather than importing
+    # app.catalog (see the module's own comment on why), and translates
+    # Gujarati via brain/data.py's own translate_to_gujarati, which shares
+    # app/translation.py's DB cache — this test is the drift detector: it
+    # fails the moment the two copies disagree.
     user = _make_user()
     for lang in ["en", "gu"]:
         ctx = _FakeToolContext({"user_id": user.id, "language": lang})

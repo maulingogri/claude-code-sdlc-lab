@@ -26,11 +26,17 @@ class Settings(BaseSettings):
     admin_password: str = ""
 
     # ADK agent (post-onboarding free-form routing: fasting/reflection/
-    # forgiveness logging, FAQ answers, escalation), via Claude through
+    # family-member logging, FAQ answers, escalation), via Claude through
     # LiteLLM. Falls back to the deterministic numbered menu when empty.
     anthropic_api_key: str = ""
     # Only needed for identity-linked Anthropic API keys — see brain/agent.py
     anthropic_workspace_id: str = ""
+
+    # Google Cloud Translation API (v2, simple API-key auth — no GCP ADC/
+    # service account needed). Used for all English<->Gujarati translation;
+    # see app/translation.py. Falls back to returning the English text
+    # untranslated if this is empty.
+    google_translate_api_key: str = ""
 
 
 settings = Settings()

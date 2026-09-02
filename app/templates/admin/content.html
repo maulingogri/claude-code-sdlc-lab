@@ -100,4 +100,43 @@
   </div>
   <button type="submit">Save FAQ entry</button>
 </form>
+
+<h3>Daily vows — pending approval ({{ pending_vows|length }})</h3>
+<p class="muted">Nothing here is ever sent to a user until approved. Gujarati is auto-drafted via Google Translate — review it before approving.</p>
+{% if not pending_vows %}
+  <div class="empty">No pending vows.</div>
+{% endif %}
+{% for v in pending_vows %}
+  <div class="card">
+    <p><strong>EN:</strong> {{ v.text_en }}</p>
+    <p><strong>GU:</strong> {{ v.text_gu }}</p>
+    <form method="post" action="/admin/content/vow/{{ v.id }}/approve" class="inline" style="display:inline">
+      <button type="submit">Approve</button>
+    </form>
+    <form method="post" action="/admin/content/vow/{{ v.id }}/delete" class="inline" style="display:inline" onsubmit="return confirm('Delete this vow candidate?')">
+      <button type="submit" class="secondary">Delete</button>
+    </form>
+  </div>
+{% endfor %}
+
+<h3>Daily vows — approved ({{ approved_vows|length }})</h3>
+{% if not approved_vows %}
+  <div class="empty">No approved vows yet — opted-in users won't receive one until at least one is approved.</div>
+{% endif %}
+{% for v in approved_vows %}
+  <div class="card">
+    <p><strong>EN:</strong> {{ v.text_en }}</p>
+    <p><strong>GU:</strong> {{ v.text_gu }}</p>
+    <form method="post" action="/admin/content/vow/{{ v.id }}/delete" class="inline" style="display:inline" onsubmit="return confirm('Delete this vow?')">
+      <button type="submit" class="secondary">Delete</button>
+    </form>
+  </div>
+{% endfor %}
+
+<form method="post" action="/admin/content/vow" class="card">
+  <strong>Add a vow candidate</strong>
+  <label for="vow_text_en">Vow text (English)</label>
+  <textarea id="vow_text_en" name="text_en" rows="2" required placeholder="e.g. Today, I will not raise my voice in anger toward anyone."></textarea>
+  <button type="submit">Add for review</button>
+</form>
 {% endblock %}

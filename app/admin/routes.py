@@ -12,7 +12,8 @@ from app.broadcast import _today, build_broadcast_text, send_daily_broadcast
 from app.config import settings
 from app.db import get_db
 from app.logging_utils import hash_phone, logger
-from app.models import FAQ, Broadcast, Escalation, User
+from app.models import FAQ, Broadcast, Escalation, User, Vow
+from app.translation import translate_to_gujarati
 from app.twilio_client import send_whatsapp_message
 
 router = APIRouter(prefix="/admin", dependencies=[Depends(require_admin)])
@@ -158,6 +159,8 @@ def content(
 ):
     broadcasts = db.query(Broadcast).order_by(Broadcast.date.asc()).all()
     faqs = db.query(FAQ).order_by(FAQ.id.desc()).all()
+    pending_vows = db.query(Vow).filter(Vow.approved.is_(False)).order_by(Vow.id.asc()).all()
+    approved_vows = db.query(Vow).filter(Vow.approved.is_(True)).order_by(Vow.id.asc()).all()
 
     edit_broadcast = None
     if edit_date:
@@ -173,6 +176,8 @@ def content(
             "active_tab": "content",
             "broadcasts": broadcasts,
             "faqs": faqs,
+            "pending_vows": pending_vows,
+            "approved_vows": approved_vows,
             "edit_broadcast": edit_broadcast,
             "edit_faq": edit_faq,
         },
@@ -237,6 +242,34 @@ def delete_faq(faq_id: int, db: Session = Depends(get_db)):
     return RedirectResponse(url="/admin/content", status_code=303)
 
 
+@router.post("/content/vow")
+def add_vow(text_en: str = Form(...), db: Session = Depends(get_db)):
+    """Admin submits English only — Gujarati is auto-drafted via Google
+    Translate. New vows always start unapproved (Vow.approved=False);
+    nothing goes to users until an admin explicitly approves it below."""
+    db.add(Vow(text_en=text_en, text_gu=translate_to_gujarati(text_en)))
+    db.commit()
+    return RedirectResponse(url="/admin/content", status_code=303)
+
+
+@router.post("/content/vow/{vow_id}/approve")
+def approve_vow(vow_id: int, db: Session = Depends(get_db)):
+    vow = db.get(Vow, vow_id)
+    if vow is not None:
+        vow.approved = True
+        db.commit()
+    return RedirectResponse(url="/admin/content", status_code=303)
+
+
+@router.post("/content/vow/{vow_id}/delete")
+def delete_vow(vow_id: int, db: Session = Depends(get_db)):
+    vow = db.get(Vow, vow_id)
+    if vow is not None:
+        db.delete(vow)
+        db.commit()
+    return RedirectResponse(url="/admin/content", status_code=303)
+
+
 # --- Users -------------------------------------------------------------
 
 
@@ -266,6 +299,7 @@ def broadcast_tab(
     request: Request,
     sent: int | None = None,
     failed: int | None = None,
+    group_sent: int | None = None,
     db: Session = Depends(get_db),
 ):
     today = _today(settings.default_timezone)
@@ -286,6 +320,13 @@ def broadcast_tab(
             flash_type = "error"
         else:
             flash = f"Sent successfully to {sent} recipient(s)."
+    elif group_sent is not None:
+        flash = (
+            "Message sent to the Sangh WhatsApp group."
+            if group_sent
+            else "Failed to send to the Sangh WhatsApp group — check server logs."
+        )
+        flash_type = None if group_sent else "error"
 
     context = {
         "active_tab": "broadcast",
@@ -293,6 +334,7 @@ def broadcast_tab(
         "broadcast": broadcast,
         "flash": flash,
         "flash_type": flash_type,
+        "group_configured": bool(settings.sangh_group_whatsapp_number),
     }
     if broadcast is not None:
         opted_in_count = db.query(User).filter(User.broadcast_opt_in.is_(True)).count()
@@ -304,6 +346,24 @@ def broadcast_tab(
             }
         )
     return templates.TemplateResponse(request, "admin/broadcast.html", context)
+
+
+@router.post("/broadcast/group-message")
+def send_group_message(message_en: str = Form(...)):
+    """Sends a one-off custom message to the Sangh WhatsApp group, English
+    plus an auto-drafted Gujarati translation — separate from the daily
+    broadcast content."""
+    if not settings.sangh_group_whatsapp_number:
+        return RedirectResponse(url="/admin/broadcast?group_sent=0", status_code=303)
+
+    combined = f"{message_en}\n\n---\n\n{translate_to_gujarati(message_en)}"
+    try:
+        send_whatsapp_message(settings.sangh_group_whatsapp_number, combined)
+        group_sent = 1
+    except Exception:
+        logger.exception("admin_group_message_send_failed")
+        group_sent = 0
+    return RedirectResponse(url=f"/admin/broadcast?group_sent={group_sent}", status_code=303)
 
 
 @router.post("/broadcast/send")

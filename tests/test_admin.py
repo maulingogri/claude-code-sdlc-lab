@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 from app.config import settings
 from app.db import get_session
 from app.main import app
-from app.models import FAQ, Broadcast, Escalation, FastingLog, User
+from app.models import FAQ, Broadcast, Dependent, Escalation, FastingLog, User, Vow
 
 AUTH = ("test-admin", "test-password")
 
@@ -340,6 +340,146 @@ def test_broadcast_send_total_failure_does_not_mark_sent():
         flash_response = client.get("/admin/broadcast?sent=0&failed=1", auth=AUTH)
         assert "Send failed for all 1 recipient" in flash_response.text
         assert 'class="flash flash-error"' in flash_response.text
+
+
+def test_add_vow_starts_unapproved_and_is_translated():
+    with patch("app.admin.routes.translate_to_gujarati", return_value="ગુજ text") as mock_translate:
+        with TestClient(app) as client:
+            response = client.post(
+                "/admin/content/vow",
+                data={"text_en": "Today, I will speak kindly."},
+                auth=AUTH,
+                follow_redirects=False,
+            )
+        assert response.status_code == 303
+        mock_translate.assert_called_once_with("Today, I will speak kindly.")
+
+    session = get_session()
+    vow = session.query(Vow).one()
+    assert vow.text_en == "Today, I will speak kindly."
+    assert vow.text_gu == "ગુજ text"
+    assert vow.approved is False
+    session.close()
+
+
+def test_content_tab_lists_pending_and_approved_vows():
+    session = get_session()
+    session.add(Vow(text_en="Pending vow", text_gu="", approved=False))
+    session.add(Vow(text_en="Approved vow", text_gu="", approved=True))
+    session.commit()
+    session.close()
+
+    with TestClient(app) as client:
+        response = client.get("/admin/content", auth=AUTH)
+        assert response.status_code == 200
+        assert "Pending vow" in response.text
+        assert "Approved vow" in response.text
+
+
+def test_approve_vow_flow():
+    session = get_session()
+    vow = Vow(text_en="A vow", text_gu="ગુજ", approved=False)
+    session.add(vow)
+    session.commit()
+    vow_id = vow.id
+    session.close()
+
+    with TestClient(app) as client:
+        response = client.post(f"/admin/content/vow/{vow_id}/approve", auth=AUTH, follow_redirects=False)
+        assert response.status_code == 303
+
+    session = get_session()
+    assert session.get(Vow, vow_id).approved is True
+    session.close()
+
+
+def test_delete_vow_flow():
+    session = get_session()
+    vow = Vow(text_en="A vow", text_gu="ગુજ", approved=False)
+    session.add(vow)
+    session.commit()
+    vow_id = vow.id
+    session.close()
+
+    with TestClient(app) as client:
+        response = client.post(f"/admin/content/vow/{vow_id}/delete", auth=AUTH, follow_redirects=False)
+        assert response.status_code == 303
+
+    session = get_session()
+    assert session.get(Vow, vow_id) is None
+    session.close()
+
+
+def test_user_detail_shows_dependents_and_their_logs():
+    user = _make_user()
+    session = get_session()
+    dependent = Dependent(guardian_id=user.id, name="Grandma Shah")
+    session.add(dependent)
+    session.commit()
+    session.add(
+        FastingLog(
+            user_id=user.id,
+            dependent_id=dependent.id,
+            date=datetime.date(2026, 9, 8),
+            fast_type="Upvas",
+        )
+    )
+    session.commit()
+    session.close()
+
+    with TestClient(app) as client:
+        response = client.get(f"/admin/users/{user.id}", auth=AUTH)
+        assert response.status_code == 200
+        assert "Grandma Shah" in response.text
+
+
+def test_send_group_message_requires_configured_group_number(monkeypatch):
+    monkeypatch.setattr(settings, "sangh_group_whatsapp_number", "")
+    with TestClient(app) as client:
+        response = client.post(
+            "/admin/broadcast/group-message",
+            data={"message_en": "Reminder: Pratikraman at 7 PM tonight."},
+            auth=AUTH,
+            follow_redirects=False,
+        )
+        assert response.status_code == 303
+        assert response.headers["location"] == "/admin/broadcast?group_sent=0"
+
+
+def test_send_group_message_translates_and_sends(monkeypatch):
+    monkeypatch.setattr(settings, "sangh_group_whatsapp_number", "whatsapp:+15551234567")
+    with patch("app.admin.routes.translate_to_gujarati", return_value="ગુજ સંદેશ") as mock_translate:
+        with patch("app.admin.routes.send_whatsapp_message") as mock_send:
+            with TestClient(app) as client:
+                response = client.post(
+                    "/admin/broadcast/group-message",
+                    data={"message_en": "Reminder: Pratikraman at 7 PM tonight."},
+                    auth=AUTH,
+                    follow_redirects=False,
+                )
+            assert response.status_code == 303
+            assert response.headers["location"] == "/admin/broadcast?group_sent=1"
+            mock_translate.assert_called_once_with("Reminder: Pratikraman at 7 PM tonight.")
+            mock_send.assert_called_once()
+            assert mock_send.call_args[0][0] == "whatsapp:+15551234567"
+            sent_text = mock_send.call_args[0][1]
+            assert "Reminder: Pratikraman at 7 PM tonight." in sent_text
+            assert "ગુજ સંદેશ" in sent_text
+
+
+def test_send_group_message_failure_redirects_with_failure_flag(monkeypatch):
+    monkeypatch.setattr(settings, "sangh_group_whatsapp_number", "whatsapp:+15551234567")
+    with patch("app.admin.routes.translate_to_gujarati", return_value="ગુજ"):
+        with patch("app.admin.routes.send_whatsapp_message", side_effect=RuntimeError("Twilio down")):
+            with TestClient(app) as client:
+                response = client.post(
+                    "/admin/broadcast/group-message",
+                    data={"message_en": "Hello"},
+                    auth=AUTH,
+                    follow_redirects=False,
+                )
+            assert response.status_code == 303
+            assert response.headers["location"] == "/admin/broadcast?group_sent=0"
 
 
 def test_broadcast_send_with_no_recipients_shows_clear_message_not_false_success():

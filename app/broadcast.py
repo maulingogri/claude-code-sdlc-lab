@@ -1,11 +1,12 @@
 import datetime
+import random
 
 from sqlalchemy.orm import Session
 
 from app.catalog import get_message
 from app.config import settings
 from app.logging_utils import hash_phone, logger
-from app.models import Broadcast, FastingLog, User
+from app.models import Broadcast, Dependent, FastingLog, User, Vow, VowAssignment
 from app.timeutils import today_in_tz
 from app.twilio_client import send_whatsapp_message
 
@@ -20,14 +21,28 @@ def _day_number(today: datetime.date) -> int:
 
 
 def _recognition_names(session: Session, for_date: datetime.date) -> list[str]:
-    rows = (
+    self_names = (
         session.query(User.display_name)
         .join(FastingLog, FastingLog.user_id == User.id)
-        .filter(FastingLog.date == for_date, User.public_recognition_optin.is_(True))
+        .filter(
+            FastingLog.date == for_date,
+            FastingLog.dependent_id.is_(None),
+            User.public_recognition_optin.is_(True),
+        )
         .filter(User.display_name.is_not(None))
         .all()
     )
-    return [name for (name,) in rows]
+    # A dependent's name appears if their guardian opted into public
+    # recognition — a dependent (young child, elder) can't consent for
+    # themselves, so this follows the guardian's own choice on their behalf.
+    dependent_names = (
+        session.query(Dependent.name)
+        .join(FastingLog, FastingLog.dependent_id == Dependent.id)
+        .join(User, User.id == Dependent.guardian_id)
+        .filter(FastingLog.date == for_date, User.public_recognition_optin.is_(True))
+        .all()
+    )
+    return [name for (name,) in self_names] + [name for (name,) in dependent_names]
 
 
 def build_broadcast_text(session: Session, broadcast: Broadcast, language: str) -> str:
@@ -49,6 +64,32 @@ def build_broadcast_text(session: Session, broadcast: Broadcast, language: str) 
     return text
 
 
+def _pick_vow_for_user(session: Session, user: User) -> Vow | None:
+    """Picks a random approved vow this user hasn't received before. Falls
+    back to allowing a repeat once the whole approved pool is exhausted,
+    rather than sending nothing."""
+    already_sent_ids = {
+        vow_id for (vow_id,) in session.query(VowAssignment.vow_id).filter(VowAssignment.user_id == user.id)
+    }
+    approved = session.query(Vow).filter(Vow.approved.is_(True)).all()
+    if not approved:
+        return None
+
+    unused = [v for v in approved if v.id not in already_sent_ids]
+    return random.choice(unused or approved)
+
+
+def _vow_section_for_user(session: Session, user: User, today: datetime.date) -> str:
+    if not user.vow_opt_in:
+        return ""
+    vow = _pick_vow_for_user(session, user)
+    if vow is None:
+        return ""
+    session.add(VowAssignment(user_id=user.id, vow_id=vow.id, date=today))
+    vow_text = vow.text_gu if (user.language or "en") == "gu" else vow.text_en
+    return get_message("daily_vow_section", user.language or "en", vow_text=vow_text)
+
+
 def send_daily_broadcast(session: Session) -> dict[str, int]:
     """Send today's broadcast to every opted-in user, plus the Sangh group
     number, in each recipient's chosen language. Intended to be run once a
@@ -64,7 +105,9 @@ def send_daily_broadcast(session: Session) -> dict[str, int]:
     users = session.query(User).filter(User.broadcast_opt_in.is_(True)).all()
     for user in users:
         language = user.language or "en"
-        text = build_broadcast_text(session, broadcast, language)
+        text = build_broadcast_text(session, broadcast, language) + _vow_section_for_user(
+            session, user, today
+        )
         try:
             send_whatsapp_message(user.phone, text)
             sent += 1

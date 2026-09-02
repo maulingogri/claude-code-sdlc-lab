@@ -16,6 +16,7 @@ from app.logging_utils import hash_phone, logger
 from app.models import User
 from app.onboarding import STEP_COMPLETE, handle_onboarding_reply, start_onboarding
 from app.personal_features import handle_post_onboarding_message
+from app.rate_limit import is_rate_limited
 
 
 @asynccontextmanager
@@ -99,6 +100,15 @@ async def twilio_webhook(request: Request) -> Response:
 
     if not phone:
         raise HTTPException(status_code=400, detail="Missing From address")
+
+    if is_rate_limited(phone):
+        # Deliberately silent (no TwiML <Message>) rather than sending a
+        # reply — replying to every over-limit message would itself be
+        # more outbound traffic during exactly the situation this exists
+        # to contain. Checked before any DB/LLM/Twilio work so an abusive
+        # sender costs us as little as possible.
+        logger.warning("rate_limited phone_hash=%s", hash_phone(phone))
+        return Response(content=str(MessagingResponse()), media_type="application/xml")
 
     session = get_session()
     try:

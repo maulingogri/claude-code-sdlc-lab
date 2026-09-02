@@ -8,9 +8,13 @@ def test_get_message_english():
     assert "Jai Jinendra" in text
 
 
-def test_get_message_gujarati():
+def test_get_message_gujarati_falls_back_to_english_without_a_translate_key():
+    # No GOOGLE_TRANSLATE_API_KEY in the test environment, so app.translation
+    # falls back to returning the English text unchanged rather than calling
+    # the real Google Translate API. See test_translation.py for coverage of
+    # the actual translation/caching behavior with a key configured.
     text = get_message("greeting", "gu")
-    assert "જય જિનેન્દ્ર" in text
+    assert text == get_message("greeting", "en")
 
 
 def test_get_message_templating():

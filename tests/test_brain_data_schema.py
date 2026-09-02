@@ -17,7 +17,7 @@ production.
 from brain import data
 
 from app.db import get_session
-from app.models import FAQ, Escalation, FastingLog, ForgivenessListEntry, Reflection, User
+from app.models import FAQ, Dependent, Escalation, FastingLog, Reflection, User
 
 
 def _make_user() -> User:
@@ -52,15 +52,67 @@ def test_log_reflection_matches_current_schema():
     session.close()
 
 
-def test_add_forgiveness_entry_matches_current_schema():
+def test_get_or_create_dependent_matches_current_schema():
     user = _make_user()
-    data.add_forgiveness_entry(user_id=user.id, name="Someone", note="a note")
+    dependent_id = data.get_or_create_dependent(user.id, "Grandma Shah")
 
     session = get_session()
-    entry = session.query(ForgivenessListEntry).filter(ForgivenessListEntry.user_id == user.id).one()
-    assert entry.name == "Someone"
-    assert entry.relationship_note == "a note"
+    dependent = session.get(Dependent, dependent_id)
+    assert dependent.guardian_id == user.id
+    assert dependent.name == "Grandma Shah"
     session.close()
+
+    # Same name for the same guardian reuses the row rather than duplicating it.
+    assert data.get_or_create_dependent(user.id, "Grandma Shah") == dependent_id
+
+
+def test_log_fast_with_dependent_matches_current_schema():
+    user = _make_user()
+    dependent_id = data.get_or_create_dependent(user.id, "Grandma Shah")
+    data.log_fast(
+        user_id=user.id,
+        fast_type="Upvas",
+        note="",
+        timezone="America/New_York",
+        dependent_id=dependent_id,
+    )
+
+    session = get_session()
+    log = session.query(FastingLog).filter(FastingLog.dependent_id == dependent_id).one()
+    assert log.user_id == user.id
+    assert log.fast_type == "Upvas"
+    session.close()
+
+
+def test_log_reflection_with_dependent_matches_current_schema():
+    user = _make_user()
+    dependent_id = data.get_or_create_dependent(user.id, "Little Priya")
+    data.log_reflection(
+        user_id=user.id, text="a reflection", timezone="America/New_York", dependent_id=dependent_id
+    )
+
+    session = get_session()
+    reflection = session.query(Reflection).filter(Reflection.dependent_id == dependent_id).one()
+    assert reflection.text == "a reflection"
+    session.close()
+
+
+def test_set_vow_opt_in_matches_current_schema():
+    user = _make_user()
+    data.set_vow_opt_in(user.id, True)
+
+    session = get_session()
+    refreshed = session.get(User, user.id)
+    assert refreshed.vow_opt_in is True
+    session.close()
+
+
+def test_translate_to_gujarati_matches_current_schema():
+    # No GOOGLE_TRANSLATE_API_KEY in the test environment, so this exercises
+    # the cache-miss + no-key fallback path rather than a real API call —
+    # the point of this test is that it queries/writes the translation_cache
+    # table without raising, i.e. the schema still matches.
+    assert data.translate_to_gujarati("Hello") == "Hello"
 
 
 def test_list_faqs_matches_current_schema():

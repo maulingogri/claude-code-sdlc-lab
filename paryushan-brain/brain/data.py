@@ -8,10 +8,15 @@ DATABASE_URL env var, using the same schema `app/models.py` defines.
 """
 
 import datetime
+import json
 import os
 import sqlite3
+import urllib.parse
+import urllib.request
 from contextlib import contextmanager
 from zoneinfo import ZoneInfo
+
+_TRANSLATE_URL = "https://translation.googleapis.com/language/translate/v2"
 
 
 def _db_path() -> str:
@@ -42,29 +47,47 @@ def _connection():
         conn.close()
 
 
-def log_fast(user_id: int, fast_type: str, note: str, timezone: str = "America/New_York") -> None:
+def get_or_create_dependent(user_id: int, name: str) -> int:
+    """Returns the id of the guardian's family member row for `name`,
+    creating it if this is the first time it's been mentioned."""
+    with _connection() as conn:
+        row = conn.execute(
+            "SELECT id FROM dependents WHERE guardian_id = ? AND name = ?", (user_id, name)
+        ).fetchone()
+        if row is not None:
+            return row[0]
+        now = datetime.datetime.utcnow().isoformat()
+        cursor = conn.execute(
+            "INSERT INTO dependents (guardian_id, name, created_at) VALUES (?, ?, ?)",
+            (user_id, name, now),
+        )
+        return cursor.lastrowid
+
+
+def log_fast(
+    user_id: int,
+    fast_type: str,
+    note: str,
+    timezone: str = "America/New_York",
+    dependent_id: int | None = None,
+) -> None:
     today = _today_in_tz(timezone).isoformat()
     with _connection() as conn:
         conn.execute(
-            "INSERT INTO fasting_logs (user_id, date, fast_type, note) VALUES (?, ?, ?, ?)",
-            (user_id, today, fast_type, note or None),
+            "INSERT INTO fasting_logs (user_id, dependent_id, date, fast_type, note) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (user_id, dependent_id, today, fast_type, note or None),
         )
 
 
-def log_reflection(user_id: int, text: str, timezone: str = "America/New_York") -> None:
+def log_reflection(
+    user_id: int, text: str, timezone: str = "America/New_York", dependent_id: int | None = None
+) -> None:
     today = _today_in_tz(timezone).isoformat()
     with _connection() as conn:
         conn.execute(
-            "INSERT INTO reflections (user_id, date, text) VALUES (?, ?, ?)",
-            (user_id, today, text),
-        )
-
-
-def add_forgiveness_entry(user_id: int, name: str, note: str) -> None:
-    with _connection() as conn:
-        conn.execute(
-            "INSERT INTO forgiveness_list (user_id, name, relationship_note) VALUES (?, ?, ?)",
-            (user_id, name, note or None),
+            "INSERT INTO reflections (user_id, dependent_id, date, text) VALUES (?, ?, ?, ?)",
+            (user_id, dependent_id, today, text),
         )
 
 
@@ -87,3 +110,45 @@ def create_escalation(user_id: int, question_text: str) -> None:
             "VALUES (?, ?, 'pending', 0, ?)",
             (user_id, question_text, now),
         )
+
+
+def set_vow_opt_in(user_id: int, opted_in: bool) -> None:
+    with _connection() as conn:
+        conn.execute("UPDATE users SET vow_opt_in = ? WHERE id = ?", (1 if opted_in else 0, user_id))
+
+
+def translate_to_gujarati(text: str) -> str:
+    """Mirrors app/translation.py's translate_to_gujarati — duplicated
+    (stdlib-only, no httpx dependency needed here) rather than imported,
+    same reasoning as everything else in this file. Shares the SAME
+    `translation_cache` table via raw SQL, so both halves of the app
+    agree on a given string's translation and never re-pay for it twice."""
+    api_key = os.environ.get("GOOGLE_TRANSLATE_API_KEY", "")
+    if not api_key or not text:
+        return text
+
+    with _connection() as conn:
+        row = conn.execute(
+            "SELECT translated_text FROM translation_cache WHERE source_text = ?", (text,)
+        ).fetchone()
+        if row is not None:
+            return row[0]
+
+    try:
+        url = f"{_TRANSLATE_URL}?{urllib.parse.urlencode({'key': api_key})}"
+        payload = json.dumps({"q": text, "source": "en", "target": "gu", "format": "text"}).encode()
+        request = urllib.request.Request(
+            url, data=payload, headers={"Content-Type": "application/json"}
+        )
+        with urllib.request.urlopen(request, timeout=10) as response:
+            body = json.loads(response.read())
+        translated = body["data"]["translations"][0]["translatedText"]
+    except Exception:
+        return text
+
+    with _connection() as conn:
+        conn.execute(
+            "INSERT OR IGNORE INTO translation_cache (source_text, translated_text) VALUES (?, ?)",
+            (text, translated),
+        )
+    return translated

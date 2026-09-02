@@ -17,10 +17,16 @@ os.environ["ANTHROPIC_API_KEY"] = ""
 import pytest  # noqa: E402
 
 from app.db import Base, engine, init_db  # noqa: E402
+from app.rate_limit import reset as reset_rate_limiter  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
 def _clean_db():
     init_db()
+    # Several tests send many messages from the same phone number in
+    # quick succession (e.g. a full onboarding conversation) — without
+    # resetting between tests, accumulated calls across the whole session
+    # would eventually trip the rate limiter and break unrelated tests.
+    reset_rate_limiter()
     yield
     Base.metadata.drop_all(bind=engine)

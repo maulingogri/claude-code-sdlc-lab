@@ -23,4 +23,16 @@
     <button type="submit">Send now</button>
   </form>
 {% endif %}
+
+<h3>Custom message to the Sangh WhatsApp group</h3>
+{% if not group_configured %}
+  <div class="empty">SANGH_GROUP_WHATSAPP_NUMBER isn't configured — set it in .env to enable this.</div>
+{% else %}
+  <p class="muted">Sent as English plus an auto-drafted Gujarati translation, separate from the daily broadcast.</p>
+  <form method="post" action="/admin/broadcast/group-message" class="card" onsubmit="return confirm('Send this message to the Sangh WhatsApp group now?')">
+    <label for="message_en">Message (English)</label>
+    <textarea id="message_en" name="message_en" rows="3" required placeholder="e.g. Reminder: tonight's Pratikraman starts 30 minutes earlier than usual."></textarea>
+    <button type="submit">Send to group</button>
+  </form>
+{% endif %}
 {% endblock %}
