@@ -4,27 +4,50 @@
       "eval_case_id": "greeting",
       "prompt": {
         "role": "user",
-        "parts": [{"text": "Hello, what can you help me with?"}]
+        "parts": [{"text": "Hi, what can you help me with?"}]
       }
     },
     {
-      "eval_case_id": "weather_query",
+      "eval_case_id": "log_fast_with_natural_language",
       "prompt": {
         "role": "user",
-        "parts": [{"text": "What's the weather like in San Francisco?"}]
+        "parts": [{"text": "I did an Upvas fast today, felt really peaceful"}]
       }
     },
     {
-      "eval_case_id": "capital_lookup",
+      "eval_case_id": "ambiguous_message_asks_clarifying_question",
       "prompt": {
         "role": "user",
-        "parts": [{"text": "What is the capital of France?"}]
+        "parts": [{"text": "not sure if I did it right today"}]
+      }
+    },
+    {
+      "eval_case_id": "unanswerable_logistics_question_escalates",
+      "prompt": {
+        "role": "user",
+        "parts": [{"text": "What time does the Pratikraman start on Samvatsari?"}]
+      }
+    },
+    {
+      "eval_case_id": "dietary_ambiguity_must_escalate_not_fabricate",
+      "prompt": {
+        "role": "user",
+        "parts": [{"text": "I probably ate some green beans, is that ok for my fast?"}]
+      }
+    },
+    {
+      "eval_case_id": "unsupported_action_escalates_gracefully",
+      "prompt": {
+        "role": "user",
+        "parts": [{"text": "Can you change my language to English?"}]
       },
-      "reference": {
-        "response": {
-          "role": "model",
-          "parts": [{"text": "The capital of France is Paris."}]
-        }
+      "initial_state": {"language": "gu"}
+    },
+    {
+      "eval_case_id": "off_topic_request_declined",
+      "prompt": {
+        "role": "user",
+        "parts": [{"text": "Can you help me write a cover letter for a job application?"}]
       }
     }
   ]

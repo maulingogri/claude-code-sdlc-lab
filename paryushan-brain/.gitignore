@@ -203,6 +203,9 @@ my_env.tfvars
 # A2A Inspector
 tools/a2a-inspector/
 
+# Local eval run outputs (agents-cli eval and run_local_eval.py both write here)
+artifacts/
+
 # Credentials and private keys
 *.pem
 *-key.json

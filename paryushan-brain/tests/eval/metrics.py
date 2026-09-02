@@ -1,21 +1,29 @@
-"""Local LLM-as-judge for `agents-cli eval grade`, wired in from
-tests/eval/eval_config.yaml (`custom_function_file: metrics.py`).
+"""Local metrics for `agents-cli eval grade`, wired in from
+tests/eval/eval_config.yaml.
 
-Scores the agent's final response 1-5 via google-genai (works on both Vertex and
-AI Studio) and grades against a case's `reference` (ground truth) when present.
+Both run fully in-process — no GCP project or Vertex Evaluation Service
+required, matching this project's Claude-via-LiteLLM setup (see
+brain/agent.py). `custom_response_quality` is an LLM-as-judge using the
+same Claude model as the agent; `escalation_used_when_expected` is a
+deterministic trace check with no LLM call at all.
 """
 
-from google import genai
-from google.genai import types
-from pydantic import BaseModel
+import json
+import os
 
+import litellm
 
-class _Verdict(BaseModel):
-    score: int  # 1-5
-    explanation: str
+_JUDGE_MODEL = "anthropic/claude-haiku-4-5-20251001"
+
+_EXTRA_HEADERS = {}
+_workspace_id = os.environ.get("ANTHROPIC_WORKSPACE_ID", "")
+if _workspace_id:
+    _EXTRA_HEADERS["anthropic-workspace-id"] = _workspace_id
 
 
 def evaluate(instance):
+    """LLM-as-judge: rate the agent's final response 1-5 for accuracy,
+    relevance, and clarity, using each case's `reference` when present."""
     reference = instance.get("reference")
     rubric = (
         "Grade the agent's final response on a 1-5 scale (1 poor, 5 excellent) for "
@@ -27,25 +35,29 @@ def evaluate(instance):
             "factual disagreement with it."
         )
     prompt = (
-        f"You are an expert QA evaluator for an enterprise AI assistant. {rubric}\n"
+        f"You are an expert QA evaluator for a WhatsApp community assistant. {rubric}\n"
         f"User Prompt: {instance.get('prompt', '')}\n"
         f"Final Response: {instance.get('response', '')}\n"
     )
     if reference:
         prompt += f"Expected Answer (ground truth): {reference}\n"
     prompt += f"Full Agent Trace: {instance.get('agent_data', '')}\n"
+    prompt += '\nRespond with ONLY a JSON object: {"score": <1-5 integer>, "explanation": "<one sentence>"}'
 
-    client = genai.Client()  # AI Studio (GEMINI_API_KEY) or Vertex (ADC)
-    response = client.models.generate_content(
-        model="gemini-flash-latest",
-        contents=prompt,
-        config=types.GenerateContentConfig(
-            temperature=0,  # deterministic grading
-            response_mime_type="application/json",
-            response_schema=_Verdict,  # guaranteed schema-valid JSON
-        ),
+    response = litellm.completion(
+        model=_JUDGE_MODEL,
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0,
+        extra_headers=_EXTRA_HEADERS or None,
     )
-    verdict = response.parsed
-    if verdict is None:  # model returned nothing usable
-        return {"score": 0, "explanation": response.text or ""}
-    return {"score": max(1, min(5, verdict.score)), "explanation": verdict.explanation}
+    text = response.choices[0].message.content or ""
+    try:
+        # Judges sometimes wrap JSON in prose or a code fence despite instructions.
+        start, end = text.index("{"), text.rindex("}") + 1
+        verdict = json.loads(text[start:end])
+        score = int(verdict.get("score", 0))
+        explanation = verdict.get("explanation", "")
+    except (ValueError, KeyError):
+        return {"score": 0, "explanation": f"Could not parse judge output: {text!r}"}
+
+    return {"score": max(1, min(5, score)), "explanation": explanation}

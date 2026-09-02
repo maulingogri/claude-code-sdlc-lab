@@ -1,6 +1,7 @@
 import os
 
 from google.adk.agents import Agent
+from google.adk.agents.callback_context import CallbackContext
 from google.adk.apps import App
 from google.adk.models.lite_llm import LiteLlm
 from google.adk.tools import ToolContext
@@ -35,9 +36,7 @@ You can help with:
   to see the current FAQ list, then answer using only that matched content
   if there's a clear match.
 - If nothing in the FAQ matches well, or you are not confident, call
-  escalate with their question. Never guess or fabricate an answer,
-  especially for religious or ritual questions — tell the user a Sangh
-  admin will follow up soon instead.
+  escalate with their question instead of answering.
 
 Rules:
 - If personal_features_enabled is false, do NOT call log_fast,
@@ -49,8 +48,23 @@ Rules:
   first instead of guessing.
 - Stay focused on Paryushan and Sangh community topics. Politely decline
   requests unrelated to that.
-- Never fabricate information. If you don't know something with
-  confidence, escalate rather than guess.
+- HARD RULE: any time your reply tells the user an admin will help, follow
+  up, or handle something for them — including things you can't do
+  yourself, like changing account settings you have no tool for — you
+  MUST call escalate with a short description of the request in that same
+  turn. Telling a user "an admin will help" without calling escalate is a
+  broken promise: nothing gets logged and no admin ever sees it.
+- HARD RULE, no exceptions: you have no religious or dietary authority.
+  You do not know, and must never state or imply, whether a specific food,
+  ingredient, or action is acceptable during a fast or otherwise
+  religiously permitted — not even a common-sense guess like "that should
+  be fine." This includes questions about whether something breaks a
+  fast, whether an ingredient is allowed, or what counts as appropriate
+  observance. For ALL such questions, call escalate immediately — do not
+  call search_faq first unless the FAQ already contains that exact
+  question. A Sangh admin answers these, never you.
+- Never fabricate information of any other kind either. If you don't know
+  something with confidence, escalate rather than guess.
 
 Current user: language={language}, personal_features_enabled={personal_features_enabled}
 """
@@ -111,6 +125,21 @@ def escalate(question_text: str, tool_context: ToolContext) -> dict:
     return {"status": "success"}
 
 
+async def _init_state(callback_context: CallbackContext) -> None:
+    """Default session state so the instruction template's {language} and
+    {personal_features_enabled} placeholders never KeyError. The real
+    webhook (app/agent_runtime.py) always sets these explicitly before the
+    first turn; this only matters for agents-cli playground/eval/run,
+    which don't seed session state."""
+    state = callback_context.state
+    if "language" not in state:
+        state["language"] = "en"
+    if "personal_features_enabled" not in state:
+        state["personal_features_enabled"] = True
+    if "user_id" not in state:
+        state["user_id"] = 0
+
+
 root_agent = Agent(
     name="root_agent",
     model=LiteLlm(
@@ -118,6 +147,7 @@ root_agent = Agent(
     ),
     instruction=INSTRUCTION,
     tools=[log_fast, log_reflection, add_forgiveness_entry, search_faq, escalate],
+    before_agent_callback=_init_state,
 )
 
 app = App(

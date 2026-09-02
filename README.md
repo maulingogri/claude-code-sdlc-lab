@@ -7,27 +7,30 @@ reflections) during the 8-day Paryushan period, September 8-15, 2026. See
 
 ## Status
 
-**Build Order steps 1-4 complete and verified end-to-end against the real
+**Build Order steps 1-5 complete and verified end-to-end against the real
 Twilio WhatsApp Sandbox:** data model, onboarding state machine, bilingual
-message catalog, the daily broadcast job, and personal features (fasting
-log, reflections, forgiveness list). **Step 5 (escalation + free-form
-routing) is built but not yet live-tested** — it needs a Gemini API key
-(see below). Admin dashboard, voice support, and the security pass (rate
-limiting) are not yet built.
+message catalog, the daily broadcast job, personal features (fasting log,
+reflections, forgiveness list), and the ADK agent for free-form routing
+and escalation, including one real eval loop (see below). Admin
+dashboard, voice support, and the security pass (rate limiting) are not
+yet built.
 
 ### Personal features & free-form routing (steps 4-5)
 
 Once onboarding is complete, a message is routed one of two ways:
 
-- **`GEMINI_API_KEY` set** → the [`paryushan-brain`](paryushan-brain/)
+- **`ANTHROPIC_API_KEY` set** → the [`paryushan-brain`](paryushan-brain/)
   ADK agent handles it: free-form natural language for logging a fast,
   saving a reflection, adding to the forgiveness list, answering from the
   FAQ, or escalating an unrecognized question to a Sangh admin. This
-  matches CLAUDE.md's "free-form replies anytime" wording.
-- **`GEMINI_API_KEY` unset** (default) → falls back to a deterministic
+  matches CLAUDE.md's "free-form replies anytime" wording. Runs on Claude
+  via LiteLLM (not Gemini — see the eval loop section below for why).
+- **`ANTHROPIC_API_KEY` unset** (default) → falls back to a deterministic
   numbered menu (reply 1/2/3, or MENU): log a fast (type + optional note),
   add a reflection, or add to the forgiveness list — no LLM involved. This
-  is also the automatic fallback if the agent call errors at runtime.
+  is also the automatic fallback if the agent call errors or times out
+  (10s budget — see `app/agent_runtime.py` — Twilio's own webhook timeout
+  is ~15s).
 
 Both paths respect `personal_opt_in` — opted-out users get a notice
 instead. See [`paryushan-brain/brain/agent.py`](paryushan-brain/brain/agent.py)
@@ -42,8 +45,8 @@ below).
   [workspace](pyproject.toml) (this project + `paryushan-brain`)
 - FastAPI (Twilio webhook) + SQLAlchemy (SQLite for Stage 1 testing)
 - Twilio WhatsApp API
-- Google ADK (`paryushan-brain/`) for free-form message routing, Gemini via
-  Google AI Studio (not Vertex AI — no GCP project needed for Stage 1)
+- Google ADK (`paryushan-brain/`) for free-form message routing, Claude via
+  LiteLLM (not Vertex AI — no GCP project needed for Stage 1)
 
 ## Architecture: why one process, not two
 
@@ -77,7 +80,7 @@ Fill in `.env`:
 - `TWILIO_WHATSAPP_NUMBER` — defaults to the shared Sandbox number `whatsapp:+14155238886`
 - `SANGH_GROUP_WHATSAPP_NUMBER` — the existing Sangh WhatsApp group's number, if you want the daily broadcast to also post there
 - Leave `SKIP_TWILIO_SIGNATURE_VALIDATION=false` except for local testing without a real Twilio account
-- `GEMINI_API_KEY` — optional. Get a free key at https://aistudio.google.com/apikey to enable the free-form ADK agent (step 5); leave blank to use the deterministic menu only
+- `ANTHROPIC_API_KEY` — optional. Get a key at https://console.anthropic.com/settings/keys to enable the free-form ADK agent (step 5); leave blank to use the deterministic menu only. If your key is identity-linked rather than workspace-scoped, also set `ANTHROPIC_WORKSPACE_ID` (Anthropic's API will tell you via a "workspace-id required" error if so)
 
 Create the database tables:
 
@@ -154,27 +157,57 @@ seed the session state our instruction needs, but still requires a real
 API key to run, which is why it's excluded from the root project's
 `uv run pytest` (see `testpaths` in [pyproject.toml](pyproject.toml)).
 
-### Known gap from live testing: dietary/ritual fabrication
+### Eval loop and the dietary/ritual fabrication fix
 
-Live-tested against the Twilio Sandbox: natural-language fast logging
-(with note extraction), reflections, forgiveness list, escalation instead
-of guessing on an unanswerable logistics question, opt-out gating, and
-graceful handling of a request with no matching tool (asked to "change
-language," it escalated rather than fabricating that feature) all worked
-as intended. **But** asked "I probably ate some green beans" (implicitly,
-whether that broke a fast), the agent confidently said "should be fine"
-with no FAQ match and no escalation — a direct miss of the "never
-fabricate, always escalate for religious/ritual questions" instruction in
-[`brain/agent.py`](paryushan-brain/brain/agent.py). Needs a real eval loop
-(`google-agents-cli-eval` — dataset cases covering dietary/ritual
-ambiguity, 5-10+ prompt-iteration cycles) before this is trustworthy for
-real users; the instruction alone isn't holding reliably.
+Live testing against the Twilio Sandbox found a real bug: asked "I
+probably ate some green beans" (implicitly, whether that broke a fast),
+the agent confidently said "should be fine" instead of escalating — a
+direct miss of the "never fabricate, escalate for religious/ritual
+questions" instruction. This was fixed through an eval loop:
+
+- **`agents-cli eval generate` doesn't work in this environment.** It
+  constructs a `vertexai.Client` internally for tracing infra, regardless
+  of the agent's own model provider, which needs working Google Cloud ADC.
+  The local `gcloud` CLI install is independently broken (fails the same
+  way under both Python 3.11 and 3.14 — a corrupted/stale SDK install, not
+  a version issue), so this path isn't available.
+- **Workaround:** [`paryushan-brain/tests/eval/run_local_eval.py`](paryushan-brain/tests/eval/run_local_eval.py)
+  — a standalone script that runs the real dataset
+  ([`tests/eval/datasets/basic-dataset.json`](paryushan-brain/tests/eval/datasets/basic-dataset.json))
+  against the live agent and scores it with the same logic as
+  [`tests/eval/metrics.py`](paryushan-brain/tests/eval/metrics.py) (an
+  LLM-as-judge using Claude, not Gemini/Vertex — no GCP dependency) plus a
+  deterministic check
+  ([`tests/eval/eval_config.yaml`](paryushan-brain/tests/eval/eval_config.yaml))
+  that specific cases must trigger `escalate()`. Run it from the repo root
+  with `ANTHROPIC_API_KEY` set: `uv run python paryushan-brain/tests/eval/run_local_eval.py`
+  (needs `DATABASE_URL` pointed at a SQLite file with tables created via
+  `scripts.init_db` first, since the agent's tools write to it).
+- **3 iterations, tracked in git history on [`brain/agent.py`](paryushan-brain/brain/agent.py):**
+  a HARD RULE added for dietary/ritual questions fixed the original bug,
+  confirmed stable across two clean reruns. A second rule (escalate
+  whenever the reply promises admin follow-up) closed a related gap where
+  the agent told users to "contact an admin" without actually logging an
+  escalation.
+- **Known remaining issue, accepted as low-severity:** for one case, the
+  model now asks "should I let them know?" before escalating rather than
+  escalating immediately — reasonable conversational UX, but means the
+  escalation only lands after a confirmation turn a single-turn eval case
+  can't exercise. Not a fabrication/safety issue like the original bug;
+  deliberately not chased further (see the eval skill's guidance on
+  diminishing returns per case).
+- `tests/integration/test_server_e2e.py` and `tests/unit/test_dummy.py`
+  are still scaffold placeholders — not part of this project's real
+  coverage.
 
 ## Not yet built (see CLAUDE.md Build Order)
 
-5. Escalation flow is built and live-tested (see above), but the
-   dietary/ritual fabrication gap above needs a real eval loop before
-   production use — `paryushan-brain`'s eval suite is still placeholders
+5. Escalation flow is built, live-tested, and has been through one real
+   eval loop (see above) — the critical dietary-fabrication bug is fixed;
+   the minor confirm-before-escalate wrinkle noted above is accepted for
+   now. Formal eval via `agents-cli eval` itself remains blocked on the
+   broken local `gcloud` install (a system-level fix someone would need to
+   run separately)
 6. Admin dashboard (Inbox / Content / Users / Broadcast tabs) — this is
    also where escalations/FAQ would actually get reviewed and answered;
    right now `escalate` just writes a pending row with no way to see it

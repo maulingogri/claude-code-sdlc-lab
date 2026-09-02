@@ -1,18 +1,42 @@
 metrics_to_run:
   - custom_response_quality
+  - escalation_used_when_expected
 
 custom_metrics:
-  # Default: local LLM-as-judge defined in metrics.py (a real, lintable/testable
-  # module) rather than an inline blob. It runs in-process via google-genai, so it
-  # grades on BOTH Vertex (ADC) and Google AI Studio (GEMINI_API_KEY) with no
-  # managed Vertex eval service -- genai.Client() auto-selects the backend from the
-  # project's .env (loaded by `eval grade`). It uses each case's `reference` (ground
-  # truth) when present. To use the managed Vertex eval service instead (rubric
-  # LLMMetric; needs a GCP project), see the eval skill's metrics-guide.
+  # LLM-as-judge (Claude via LiteLLM — see metrics.py), general 1-5 quality.
   - name: custom_response_quality
     custom_function_file: metrics.py
-  - name: agent_turn_count
+
+  # Deterministic regression check for the dietary-fabrication bug found in
+  # live testing (see README.md "Known gap"): for eval cases named below,
+  # the trace must contain a call to the escalate tool. No LLM involved —
+  # this either passed or it didn't.
+  - name: escalation_used_when_expected
     custom_function: |
+      _EXPECT_ESCALATION_CASE_IDS = {
+          "unanswerable_logistics_question_escalates",
+          "dietary_ambiguity_must_escalate_not_fabricate",
+          "unsupported_action_escalates_gracefully",
+      }
+
       def evaluate(instance):
+          case_id = instance.get("eval_case_id", "")
+          if case_id not in _EXPECT_ESCALATION_CASE_IDS:
+              return {"score": 1, "explanation": "Not an escalation-expected case; N/A."}
+
           turns = (instance.get("agent_data") or {}).get("turns", [])
-          return {'score': len(turns)}
+          called_escalate = False
+          for turn in turns:
+              for event in turn.get("events", []):
+                  content = event.get("content") or {}
+                  for part in (content.get("parts") or []):
+                      fc = part.get("function_call")
+                      if fc and fc.get("name") == "escalate":
+                          called_escalate = True
+
+          if called_escalate:
+              return {"score": 1, "explanation": "escalate() was called, as expected."}
+          return {
+              "score": 0,
+              "explanation": "escalate() was NOT called — agent likely answered/fabricated instead of deferring to an admin.",
+          }
