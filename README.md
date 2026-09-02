@@ -290,24 +290,36 @@ the agent confidently said "should be fine" instead of escalating — a
 direct miss of the "never fabricate, escalate for religious/ritual
 questions" instruction. This was fixed through an eval loop:
 
-- **`agents-cli eval generate` doesn't work in this environment.** It
-  constructs a `vertexai.Client` internally for tracing infra, regardless
-  of the agent's own model provider, which needs working Google Cloud ADC.
-  The local `gcloud` CLI install is independently broken (fails the same
-  way under both Python 3.11 and 3.14 — a corrupted/stale SDK install, not
-  a version issue), so this path isn't available.
-- **Workaround:** [`paryushan-brain/tests/eval/run_local_eval.py`](paryushan-brain/tests/eval/run_local_eval.py)
-  — a standalone script that runs the real dataset
+- **`agents-cli eval generate` originally didn't work in this
+  environment.** It constructs a `vertexai.Client` internally for tracing
+  infra, regardless of the agent's own model provider, which needs
+  working Google Cloud ADC — blocked at the time by a broken local
+  `gcloud` install. **Fixed**: reinstalled `gcloud`, ran `gcloud auth
+  login` and `gcloud auth application-default login` (both need a real
+  interactive browser session — not something an agent can do
+  unattended), and set a quota project the account actually has access
+  to. `agents-cli eval generate` + `eval grade` now run for real — see
+  the results below. `paryushan-brain/.env` needs its own `DATABASE_URL`
+  (kept separate from the root project's `paryushan.db` so eval runs
+  don't write into real dev data) — schema initialized once via
+  `DATABASE_URL="sqlite:///$(pwd)/paryushan-brain/paryushan.db" uv run
+  python -m scripts.init_db` from the repo root.
+- **Standalone fallback still available:** [`paryushan-brain/tests/eval/run_local_eval.py`](paryushan-brain/tests/eval/run_local_eval.py)
+  — runs the same dataset
   ([`tests/eval/datasets/basic-dataset.json`](paryushan-brain/tests/eval/datasets/basic-dataset.json))
-  against the live agent and scores it with the same logic as
+  against the live agent with the same scoring logic as
   [`tests/eval/metrics.py`](paryushan-brain/tests/eval/metrics.py) (an
-  LLM-as-judge using Claude, not Gemini/Vertex — no GCP dependency) plus a
-  deterministic check
-  ([`tests/eval/eval_config.yaml`](paryushan-brain/tests/eval/eval_config.yaml))
-  that specific cases must trigger `escalate()`. Run it from the repo root
-  with `ANTHROPIC_API_KEY` set: `uv run python paryushan-brain/tests/eval/run_local_eval.py`
-  (needs `DATABASE_URL` pointed at a SQLite file with tables created via
-  `scripts.init_db` first, since the agent's tools write to it).
+  LLM-as-judge using Claude, not Gemini/Vertex) plus the deterministic
+  `escalate()` check
+  ([`tests/eval/eval_config.yaml`](paryushan-brain/tests/eval/eval_config.yaml),
+  duplicated by hand — keep both in sync). Useful for a quick check with
+  no GCP/ADC dependency at all; the real `agents-cli eval` path above is
+  now the primary one. Run from the repo root with `ANTHROPIC_API_KEY`
+  set: `uv run python paryushan-brain/tests/eval/run_local_eval.py`.
+- **Latest full run (all 7 cases, `agents-cli eval generate` + `eval
+  grade`):** `custom_response_quality` mean 4.86/5 (stdev 0.38),
+  `escalation_used_when_expected` mean 1.0/1.0 — every case expected to
+  escalate did.
 - **3 iterations, tracked in git history on [`brain/agent.py`](paryushan-brain/brain/agent.py):**
   a HARD RULE added for dietary/ritual questions fixed the original bug,
   confirmed stable across two clean reruns. A second rule (escalate
@@ -351,9 +363,9 @@ stamped) — both now work end-to-end.
 Escalation flow is built, live-tested, and has been through one real
 eval loop (see above) — the critical dietary-fabrication bug is fixed;
 the minor confirm-before-escalate wrinkle noted above is accepted for
-now. Formal eval via `agents-cli eval` itself remains blocked on the
-broken local `gcloud` install (a system-level fix someone would need to
-run separately).
+now. Formal eval via `agents-cli eval` was blocked on a broken local
+`gcloud` install — now fixed (see "Eval loop" above); the real
+`generate`/`grade` pipeline runs cleanly.
 
 Step 7 (security pass) is complete: signature validation, hashed-phone
 logging, and per-user webhook rate limiting
