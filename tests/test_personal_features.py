@@ -1,0 +1,154 @@
+from app.db import get_session
+from app.models import FastingLog, ForgivenessListEntry, Reflection, User
+from app.personal_features import handle_post_onboarding_message
+
+
+def _onboarded_user(session, personal_opt_in: bool = True) -> User:
+    user = User(
+        phone="+15550009999",
+        language="en",
+        onboarding_step="complete",
+        personal_opt_in=personal_opt_in,
+    )
+    session.add(user)
+    session.flush()
+    return user
+
+
+def test_personal_features_off_notice_when_opted_out():
+    session = get_session()
+    try:
+        user = _onboarded_user(session, personal_opt_in=False)
+        replies = handle_post_onboarding_message(session, user, "1")
+        assert "opted out" in replies[0].lower()
+    finally:
+        session.close()
+
+
+def test_unrecognized_message_shows_fallback_and_menu():
+    session = get_session()
+    try:
+        user = _onboarded_user(session)
+        replies = handle_post_onboarding_message(session, user, "random question")
+        assert len(replies) == 2
+        assert "didn't understand" in replies[0].lower()
+        assert "log a fast" in replies[1].lower()
+    finally:
+        session.close()
+
+
+def test_menu_keyword_shows_menu():
+    session = get_session()
+    try:
+        user = _onboarded_user(session)
+        replies = handle_post_onboarding_message(session, user, "menu")
+        assert "log a fast" in replies[0].lower()
+    finally:
+        session.close()
+
+
+def test_log_fast_flow_with_note():
+    session = get_session()
+    try:
+        user = _onboarded_user(session)
+        handle_post_onboarding_message(session, user, "1")
+        assert user.active_flow == "fast_type"
+
+        handle_post_onboarding_message(session, user, "Upvas")
+        assert user.active_flow == "fast_note"
+
+        replies = handle_post_onboarding_message(session, user, "Felt peaceful today")
+        session.commit()
+
+        assert user.active_flow is None
+        assert "Upvas" in replies[0]
+
+        log = session.query(FastingLog).filter(FastingLog.user_id == user.id).one()
+        assert log.fast_type == "Upvas"
+        assert log.note == "Felt peaceful today"
+    finally:
+        session.close()
+
+
+def test_log_fast_flow_skip_note():
+    session = get_session()
+    try:
+        user = _onboarded_user(session)
+        handle_post_onboarding_message(session, user, "fast")
+        handle_post_onboarding_message(session, user, "Ekasana")
+        handle_post_onboarding_message(session, user, "skip")
+        session.commit()
+
+        log = session.query(FastingLog).filter(FastingLog.user_id == user.id).one()
+        assert log.fast_type == "Ekasana"
+        assert log.note is None
+    finally:
+        session.close()
+
+
+def test_log_reflection_flow():
+    session = get_session()
+    try:
+        user = _onboarded_user(session)
+        handle_post_onboarding_message(session, user, "2")
+        assert user.active_flow == "reflection_text"
+
+        replies = handle_post_onboarding_message(session, user, "Grateful for community today.")
+        session.commit()
+
+        assert user.active_flow is None
+        assert "saved" in replies[0].lower()
+        reflection = session.query(Reflection).filter(Reflection.user_id == user.id).one()
+        assert reflection.text == "Grateful for community today."
+    finally:
+        session.close()
+
+
+def test_log_forgiveness_flow_with_note():
+    session = get_session()
+    try:
+        user = _onboarded_user(session)
+        handle_post_onboarding_message(session, user, "3")
+        assert user.active_flow == "forgiveness_name"
+
+        handle_post_onboarding_message(session, user, "Rina Shah")
+        assert user.active_flow == "forgiveness_note"
+
+        replies = handle_post_onboarding_message(session, user, "A close friend, lost touch this year")
+        session.commit()
+
+        assert user.active_flow is None
+        assert "Rina Shah" in replies[0]
+
+        entry = (
+            session.query(ForgivenessListEntry).filter(ForgivenessListEntry.user_id == user.id).one()
+        )
+        assert entry.name == "Rina Shah"
+        assert entry.relationship_note == "A close friend, lost touch this year"
+    finally:
+        session.close()
+
+
+def test_cancel_mid_flow():
+    session = get_session()
+    try:
+        user = _onboarded_user(session)
+        handle_post_onboarding_message(session, user, "1")
+        assert user.active_flow == "fast_type"
+
+        replies = handle_post_onboarding_message(session, user, "cancel")
+        assert user.active_flow is None
+        assert "cancelled" in replies[0].lower()
+    finally:
+        session.close()
+
+
+def test_invalid_menu_choice_reprompts():
+    session = get_session()
+    try:
+        user = _onboarded_user(session)
+        replies = handle_post_onboarding_message(session, user, "xyz")
+        assert user.active_flow is None
+        assert "didn't understand" in replies[0].lower()
+    finally:
+        session.close()
