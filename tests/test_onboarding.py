@@ -38,6 +38,37 @@ def test_language_choice_advances_to_broadcast_optin():
     assert user.onboarding_step == STEP_BROADCAST_OPTIN
 
 
+def test_change_language_jumps_back_from_any_step():
+    user = _new_user()
+    start_onboarding(user)
+    handle_onboarding_reply(user, "2")  # picked Gujarati
+    assert user.onboarding_step == STEP_BROADCAST_OPTIN
+
+    replies = handle_onboarding_reply(user, "Change language")
+    assert user.onboarding_step == STEP_LANGUAGE
+    assert "English" in replies[0]
+    assert "ગુજરાતી" in replies[0]
+
+    # Can now pick a different language and continue normally.
+    handle_onboarding_reply(user, "1")
+    assert user.language == "en"
+    assert user.onboarding_step == STEP_BROADCAST_OPTIN
+
+
+def test_change_language_is_case_insensitive_and_gujarati_keyword_works():
+    user = _new_user()
+    start_onboarding(user)
+    handle_onboarding_reply(user, "1")
+
+    replies = handle_onboarding_reply(user, "CHANGE LANGUAGE")
+    assert user.onboarding_step == STEP_LANGUAGE
+
+    handle_onboarding_reply(user, "1")
+    replies = handle_onboarding_reply(user, "ભાષા બદલો")
+    assert user.onboarding_step == STEP_LANGUAGE
+    assert len(replies) == 1
+
+
 def test_broadcast_optin_and_name_combined_reply():
     """Broadcast opt-in and name are collected in one message/reply — a
     low-stakes preference paired with something needed either way, unlike

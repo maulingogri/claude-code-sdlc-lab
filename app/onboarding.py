@@ -33,6 +33,12 @@ _LANGUAGE_VALUES = {
 
 _LANGUAGE_NAMES = {"en": "English", "gu": "Gujarati"}
 
+# Lets a user jump back to the language step from anywhere mid-onboarding —
+# without this, picking the "wrong" language locks them in until onboarding
+# finishes (live testing found this: a user tried "Change language" mid-flow
+# and got the generic invalid-reply reprompt instead).
+_CHANGE_LANGUAGE_VALUES = {"change language", "ભાષા બદલો"}
+
 
 @dataclass
 class OnboardingResult:
@@ -82,6 +88,10 @@ def handle_onboarding_reply(user: User, body: str) -> list[str]:
     Returns the list of WhatsApp messages to send back, in order."""
     lang = user.language or "en"
     step = user.onboarding_step
+
+    if step != STEP_LANGUAGE and body.strip().lower() in _CHANGE_LANGUAGE_VALUES:
+        user.onboarding_step = STEP_LANGUAGE
+        return [get_message("ask_language", "en")]
 
     if step == STEP_LANGUAGE:
         choice = _parse_language(body)
