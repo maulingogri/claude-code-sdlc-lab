@@ -1702,6 +1702,7 @@ version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
     { name = "fastapi" },
+    { name = "jinja2" },
     { name = "paryushan-brain" },
     { name = "pydantic-settings" },
     { name = "python-dotenv" },
@@ -1720,6 +1721,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "fastapi", specifier = ">=0.141.1" },
+    { name = "jinja2", specifier = ">=3.1.6" },
     { name = "paryushan-brain", editable = "paryushan-brain" },
     { name = "pydantic-settings", specifier = ">=2.15.0" },
     { name = "python-dotenv", specifier = ">=1.2.3" },

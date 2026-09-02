@@ -1,0 +1,26 @@
+{% extends "admin/base.html" %}
+{% block title %}Broadcast{% endblock %}
+{% block content %}
+<h2>Today's broadcast — {{ today }}</h2>
+
+{% if not broadcast %}
+  <div class="empty">No broadcast content has been set for today. Add it on the <a href="/admin/content">Content</a> tab first.</div>
+{% else %}
+  <p class="muted">Day {{ broadcast.day_number }} of 8 · {{ opted_in_count }} recipient(s) opted in{{ ' · already sent at ' + broadcast.sent_at.strftime('%Y-%m-%d %H:%M UTC') if broadcast.sent_at else '' }}</p>
+
+  <div class="two-col">
+    <div class="card">
+      <strong>English preview</strong>
+      <p style="white-space:pre-wrap">{{ preview_en }}</p>
+    </div>
+    <div class="card">
+      <strong>Gujarati preview</strong>
+      <p style="white-space:pre-wrap">{{ preview_gu }}</p>
+    </div>
+  </div>
+
+  <form method="post" action="/admin/broadcast/send" onsubmit="return confirm('Send today\'s broadcast to {{ opted_in_count }} recipient(s) now?')">
+    <button type="submit">Send now</button>
+  </form>
+{% endif %}
+{% endblock %}

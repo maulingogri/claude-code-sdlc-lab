@@ -1,0 +1,103 @@
+{% extends "admin/base.html" %}
+{% block title %}Content{% endblock %}
+{% block content %}
+<h2>Content</h2>
+
+<h3>Daily broadcasts</h3>
+<table>
+  <thead><tr><th>Date</th><th>Day</th><th>Theme (EN)</th><th>Pratikraman</th><th>Sent</th><th></th></tr></thead>
+  <tbody>
+    {% for b in broadcasts %}
+    <tr>
+      <td>{{ b.date }}</td>
+      <td>{{ b.day_number }}</td>
+      <td>{{ b.theme_en }}</td>
+      <td>{{ b.pratikraman_timing }}</td>
+      <td>{{ 'Yes' if b.sent_at else '—' }}</td>
+      <td><a class="row-link" href="/admin/content?edit_date={{ b.date }}">Edit</a></td>
+    </tr>
+    {% else %}
+    <tr><td colspan="6" class="empty">No broadcast content yet.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<form method="post" action="/admin/content/broadcast" class="card">
+  <strong>{{ 'Edit broadcast' if edit_broadcast else 'Add a broadcast' }}</strong>
+  <label for="date">Date</label>
+  <input type="date" id="date" name="date" value="{{ edit_broadcast.date if edit_broadcast else '' }}" required>
+  <label for="day_number">Day number (1-8)</label>
+  <input type="text" id="day_number" name="day_number" value="{{ edit_broadcast.day_number if edit_broadcast else '' }}" required>
+  <div class="two-col">
+    <div>
+      <label for="theme_en">Theme (English)</label>
+      <input type="text" id="theme_en" name="theme_en" value="{{ edit_broadcast.theme_en if edit_broadcast else '' }}" required>
+    </div>
+    <div>
+      <label for="theme_gu">Theme (Gujarati)</label>
+      <input type="text" id="theme_gu" name="theme_gu" value="{{ edit_broadcast.theme_gu if edit_broadcast else '' }}" required>
+    </div>
+  </div>
+  <label for="pratikraman_timing">Pratikraman timing</label>
+  <input type="text" id="pratikraman_timing" name="pratikraman_timing" value="{{ edit_broadcast.pratikraman_timing if edit_broadcast else '' }}" required placeholder="e.g. 7:00 PM">
+  <div class="two-col">
+    <div>
+      <label for="announcements_en">Announcements (English)</label>
+      <textarea id="announcements_en" name="announcements_en" rows="2">{{ edit_broadcast.announcements_en if edit_broadcast else '' }}</textarea>
+    </div>
+    <div>
+      <label for="announcements_gu">Announcements (Gujarati)</label>
+      <textarea id="announcements_gu" name="announcements_gu" rows="2">{{ edit_broadcast.announcements_gu if edit_broadcast else '' }}</textarea>
+    </div>
+  </div>
+  <button type="submit">Save broadcast</button>
+</form>
+
+<h3>FAQ</h3>
+<table>
+  <thead><tr><th>Question (EN)</th><th>Answer (EN)</th><th></th></tr></thead>
+  <tbody>
+    {% for f in faqs %}
+    <tr>
+      <td>{{ f.question_en }}</td>
+      <td>{{ f.answer_en }}</td>
+      <td>
+        <a class="row-link" href="/admin/content?edit_faq_id={{ f.id }}">Edit</a>
+        &nbsp;·&nbsp;
+        <form method="post" action="/admin/content/faq/{{ f.id }}/delete" class="inline" style="display:inline" onsubmit="return confirm('Delete this FAQ entry?')">
+          <button type="submit" class="secondary" style="margin:0;padding:2px 8px;font-size:12px;">Delete</button>
+        </form>
+      </td>
+    </tr>
+    {% else %}
+    <tr><td colspan="3" class="empty">No FAQ entries yet.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<form method="post" action="/admin/content/faq" class="card">
+  <strong>{{ 'Edit FAQ entry' if edit_faq else 'Add a FAQ entry' }}</strong>
+  {% if edit_faq %}<input type="text" name="faq_id" value="{{ edit_faq.id }}" hidden>{% endif %}
+  <div class="two-col">
+    <div>
+      <label for="faq_question_en">Question (English)</label>
+      <textarea id="faq_question_en" name="question_en" rows="2" required>{{ edit_faq.question_en if edit_faq else '' }}</textarea>
+    </div>
+    <div>
+      <label for="faq_question_gu">Question (Gujarati)</label>
+      <textarea id="faq_question_gu" name="question_gu" rows="2" required>{{ edit_faq.question_gu if edit_faq else '' }}</textarea>
+    </div>
+  </div>
+  <div class="two-col">
+    <div>
+      <label for="faq_answer_en">Answer (English)</label>
+      <textarea id="faq_answer_en" name="answer_en" rows="3" required>{{ edit_faq.answer_en if edit_faq else '' }}</textarea>
+    </div>
+    <div>
+      <label for="faq_answer_gu">Answer (Gujarati)</label>
+      <textarea id="faq_answer_gu" name="answer_gu" rows="3" required>{{ edit_faq.answer_gu if edit_faq else '' }}</textarea>
+    </div>
+  </div>
+  <button type="submit">Save FAQ entry</button>
+</form>
+{% endblock %}

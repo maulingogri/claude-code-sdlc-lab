@@ -1,0 +1,31 @@
+{% extends "admin/base.html" %}
+{% block title %}Add to FAQ{% endblock %}
+{% block content %}
+<h2>Add to FAQ</h2>
+<p class="muted">From the escalation asked by {{ escalation.user.phone }}. Pre-filled from the original question/reply — fill in the other language before saving.</p>
+
+<form method="post" action="/admin/inbox/{{ escalation.id }}/add-to-faq" class="card">
+  <div class="two-col">
+    <div>
+      <label for="question_en">Question (English)</label>
+      <textarea id="question_en" name="question_en" rows="2" required>{{ question_en }}</textarea>
+    </div>
+    <div>
+      <label for="question_gu">Question (Gujarati)</label>
+      <textarea id="question_gu" name="question_gu" rows="2" required>{{ question_gu }}</textarea>
+    </div>
+  </div>
+  <div class="two-col">
+    <div>
+      <label for="answer_en">Answer (English)</label>
+      <textarea id="answer_en" name="answer_en" rows="3" required>{{ answer_en }}</textarea>
+    </div>
+    <div>
+      <label for="answer_gu">Answer (Gujarati)</label>
+      <textarea id="answer_gu" name="answer_gu" rows="3" required>{{ answer_gu }}</textarea>
+    </div>
+  </div>
+  <button type="submit">Save to FAQ</button>
+  <a class="row-link" href="/admin/inbox"><button type="button" class="secondary">Cancel</button></a>
+</form>
+{% endblock %}

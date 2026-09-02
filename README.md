@@ -7,13 +7,36 @@ reflections) during the 8-day Paryushan period, September 8-15, 2026. See
 
 ## Status
 
-**Build Order steps 1-5 complete and verified end-to-end against the real
-Twilio WhatsApp Sandbox:** data model, onboarding state machine, bilingual
-message catalog, the daily broadcast job, personal features (fasting log,
-reflections, forgiveness list), and the ADK agent for free-form routing
-and escalation, including one real eval loop (see below). Admin
-dashboard, voice support, and the security pass (rate limiting) are not
-yet built.
+**Build Order steps 1-6 complete.** Steps 1-5 verified end-to-end against
+the real Twilio WhatsApp Sandbox: data model, onboarding state machine,
+bilingual message catalog, the daily broadcast job, personal features
+(fasting log, reflections, forgiveness list), and the ADK agent for
+free-form routing and escalation, including one real eval loop (see
+below). Step 6 (admin dashboard) is built and tested (pytest + a manual
+browser pass); not yet used by a real admin day-to-day. Voice support and
+the security pass (rate limiting) are not yet built.
+
+### Admin dashboard (step 6)
+
+Server-rendered (Jinja2, no frontend framework) at `/admin`, gated by
+HTTP Basic auth against `ADMIN_USERNAME`/`ADMIN_PASSWORD` — a single
+shared login, per CLAUDE.md (no per-admin accounts). If either is unset,
+`/admin/*` returns 503 rather than being silently open.
+
+- **Inbox** — pending escalations with a reply box (sends via Twilio,
+  marks answered); answered ones get an "Add to FAQ" action that opens a
+  bilingual form pre-filled from the original question/answer.
+- **Content** — daily broadcasts and FAQ entries, both bilingual
+  side-by-side; add or edit either (broadcasts upsert by date).
+- **Users** — list with opt-in flags; drill into one user's fasting logs
+  and reflections (per CLAUDE.md, this personal data being visible here
+  to admins is a deliberate disclosed design choice, not a leak).
+- **Broadcast** — today's content previewed in both languages, with a
+  "Send now" button that calls the same `send_daily_broadcast` the
+  Railway cron job uses.
+
+See [`app/admin/`](app/admin/) (routes + auth) and
+[`app/templates/admin/`](app/templates/admin/).
 
 ### Personal features & free-form routing (steps 4-5)
 
@@ -208,9 +231,6 @@ questions" instruction. This was fixed through an eval loop:
    now. Formal eval via `agents-cli eval` itself remains blocked on the
    broken local `gcloud` install (a system-level fix someone would need to
    run separately)
-6. Admin dashboard (Inbox / Content / Users / Broadcast tabs) — this is
-   also where escalations/FAQ would actually get reviewed and answered;
-   right now `escalate` just writes a pending row with no way to see it
 7. Security pass: webhook rate limiting (signature validation and
    hashed-phone logging are already in place)
 

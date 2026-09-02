@@ -5,6 +5,7 @@ from fastapi.responses import Response
 from twilio.request_validator import RequestValidator
 from twilio.twiml.messaging_response import MessagingResponse
 
+from app.admin.routes import router as admin_router
 from app.catalog import get_message
 from app.config import settings
 from app.db import get_session, init_db
@@ -21,6 +22,7 @@ async def _lifespan(_app: FastAPI):
 
 
 app = FastAPI(title="Louisville Jain Sangh Paryushan Agent", lifespan=_lifespan)
+app.include_router(admin_router)
 
 
 @app.get("/healthz")

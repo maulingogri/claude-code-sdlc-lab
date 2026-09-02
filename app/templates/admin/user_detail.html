@@ -1,0 +1,34 @@
+{% extends "admin/base.html" %}
+{% block title %}{{ user.phone }}{% endblock %}
+{% block content %}
+<p><a class="row-link" href="/admin/users">&larr; All users</a></p>
+<h2>{{ user.phone }}</h2>
+<p class="muted">
+  language={{ user.language or '—' }} · broadcast_opt_in={{ user.broadcast_opt_in }} ·
+  personal_opt_in={{ user.personal_opt_in }} · public_recognition_optin={{ user.public_recognition_optin }} ·
+  display_name={{ user.display_name or '—' }} · onboarding_step={{ user.onboarding_step }}
+</p>
+
+<h3>Fasting logs ({{ user.fasting_logs|length }})</h3>
+{% if not user.fasting_logs %}
+  <div class="empty">No fasting logs.</div>
+{% else %}
+<table>
+  <thead><tr><th>Date</th><th>Type</th><th>Note</th></tr></thead>
+  <tbody>
+    {% for log in user.fasting_logs %}
+    <tr><td>{{ log.date }}</td><td>{{ log.fast_type }}</td><td>{{ log.note or '—' }}</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+
+<h3>Reflections ({{ user.reflections|length }})</h3>
+{% if not user.reflections %}
+  <div class="empty">No reflections.</div>
+{% else %}
+{% for r in user.reflections %}
+  <div class="card"><span class="muted">{{ r.date }}</span><p>{{ r.text }}</p></div>
+{% endfor %}
+{% endif %}
+{% endblock %}

@@ -1,3 +1,5 @@
+from collections.abc import Iterator
+
 from sqlalchemy import create_engine
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
@@ -14,6 +16,15 @@ class Base(DeclarativeBase):
 
 def get_session() -> Session:
     return SessionLocal()
+
+
+def get_db() -> Iterator[Session]:
+    """FastAPI dependency: yields a session, closes it after the request."""
+    session = SessionLocal()
+    try:
+        yield session
+    finally:
+        session.close()
 
 
 def init_db() -> None:

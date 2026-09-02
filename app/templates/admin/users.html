@@ -1,0 +1,22 @@
+{% extends "admin/base.html" %}
+{% block title %}Users{% endblock %}
+{% block content %}
+<h2>Users ({{ users|length }})</h2>
+<table>
+  <thead><tr><th>Phone</th><th>Language</th><th>Broadcast</th><th>Personal</th><th>Recognition</th><th>Onboarding</th></tr></thead>
+  <tbody>
+    {% for u in users %}
+    <tr>
+      <td><a class="row-link" href="/admin/users/{{ u.id }}">{{ u.phone }}</a></td>
+      <td>{{ u.language or '—' }}</td>
+      <td>{{ 'Yes' if u.broadcast_opt_in else 'No' }}</td>
+      <td>{{ 'Yes' if u.personal_opt_in else 'No' }}</td>
+      <td>{{ 'Yes' if u.public_recognition_optin else 'No' }}</td>
+      <td>{{ u.onboarding_step }}</td>
+    </tr>
+    {% else %}
+    <tr><td colspan="6" class="empty">No users yet.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}
