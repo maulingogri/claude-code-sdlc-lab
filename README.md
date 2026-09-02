@@ -12,9 +12,10 @@ the real Twilio WhatsApp Sandbox: data model, onboarding state machine,
 bilingual message catalog, the daily broadcast job, personal features
 (fasting log, reflections, forgiveness list), and the ADK agent for
 free-form routing and escalation, including one real eval loop (see
-below). Step 6 (admin dashboard) is built and tested (pytest + a manual
-browser pass); not yet used by a real admin day-to-day. Voice support and
-the security pass (rate limiting) are not yet built.
+below). Step 6 (admin dashboard) is built and live-tested end-to-end,
+including a real admin escalation reply and a real daily broadcast send
+via Twilio (see "Twilio Trust Hub" below). Voice support and the
+security pass (rate limiting) are not yet built.
 
 **Also been through a full code-review pass** (10 confirmed findings, all
 fixed — privacy-consent enforcement, a timezone bug, blocking I/O on the
@@ -234,39 +235,26 @@ questions" instruction. This was fixed through an eval loop:
   are still scaffold placeholders — not part of this project's real
   coverage.
 
-## ⚠ Pre-production blocker: Twilio Trust Hub / compliance KYC
+## Twilio Trust Hub / compliance KYC — resolved
 
-Discovered via live testing (2026-09-02), not caught by any automated
-test since they mock the Twilio client: sending a message **proactively**
+Live testing (2026-09-02) found that sending a message **proactively**
 via the REST API (`Client.messages.create()`, used by both
-`app/twilio_client.py:send_whatsapp_message` — and therefore by the admin
-Inbox's reply feature *and* `send_daily_broadcast`) fails with
+`app/twilio_client.py:send_whatsapp_message` — so both the admin Inbox's
+reply feature and `send_daily_broadcast`) failed with a 401 ("Primary
+compliance profile is not approved... complete the KYC process in Trust
+Hub"). This was an **account-level Twilio restriction**, not a code bug —
+it didn't affect replies returned as TwiML directly in the webhook
+response (onboarding, the ADK agent's own replies), which is why prior
+WhatsApp testing had worked fine; it only blocked admin-initiated and
+cron-triggered outbound sends. The error handling behaved correctly
+around it (escalations stayed `pending`, nothing left in a bad state,
+failures logged).
 
-```
-twilio.base.exceptions.TwilioRestException: HTTP 401 error: Unable to create
-record: Primary compliance profile is not approved. Please refer to
-documentation and complete the KYC process in Trust Hub to gain access.
-```
-
-This is an **account-level Twilio restriction**, not a code bug — it does
-not affect replies returned as TwiML directly in the webhook response
-(onboarding, the ADK agent's replies within the 24h window), which is why
-all prior WhatsApp testing worked fine. It specifically blocks:
-
-- **Admin Inbox replies** (`/admin/inbox/{id}/reply`) — fails with a 502,
-  correctly leaves the escalation `status="pending"` (verified: no bad
-  state left behind), but the user never gets the reply
-- **Daily broadcasts** (`send_daily_broadcast`, both the admin "Send now"
-  button and the Railway cron job) — every send in the loop would fail
-  the same way
-
-**Before Stage 2 (Sept 8):** complete Twilio's Trust Hub compliance/KYC
-process (Console → Trust Hub) — this is account setup only the account
-owner can do (submitting business/organization info for approval,
-possibly A2P 10DLC campaign registration depending on region). Retest
-both the admin reply flow and a real (non-zero-recipient) broadcast send
-once approved, since this session only confirmed the failure mode and
-error handling, not that a real send succeeds.
+**Resolved same day**: an individual Trust Hub profile was approved.
+Retested both paths live — admin Inbox reply (`Response Status Code: 201`,
+real message SID, escalation correctly marked `answered`) and a real
+daily broadcast send (`sent=1 failed=0`, `Broadcast.sent_at` correctly
+stamped) — both now work end-to-end.
 
 ## Not yet built (see CLAUDE.md Build Order)
 
