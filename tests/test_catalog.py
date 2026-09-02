@@ -1,6 +1,9 @@
+from unittest.mock import patch
+
 import pytest
 
 from app.catalog import get_message
+from app.config import settings
 
 
 def test_get_message_english():
@@ -9,12 +12,14 @@ def test_get_message_english():
 
 
 def test_get_message_gujarati_falls_back_to_english_without_a_translate_key():
-    # No GOOGLE_TRANSLATE_API_KEY in the test environment, so app.translation
-    # falls back to returning the English text unchanged rather than calling
-    # the real Google Translate API. See test_translation.py for coverage of
-    # the actual translation/caching behavior with a key configured.
-    text = get_message("greeting", "gu")
-    assert text == get_message("greeting", "en")
+    # Explicitly forced empty here rather than relying on the ambient .env
+    # being blank — app.translation falls back to returning the English
+    # text unchanged when there's no key, rather than calling the real
+    # Google Translate API. See test_translation.py for coverage of the
+    # actual translation/caching behavior with a key configured.
+    with patch.object(settings, "google_translate_api_key", ""):
+        text = get_message("greeting", "gu")
+        assert text == get_message("greeting", "en")
 
 
 def test_get_message_templating():

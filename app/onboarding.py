@@ -31,6 +31,8 @@ _LANGUAGE_VALUES = {
     "ગુજરાતી": "gu",
 }
 
+_LANGUAGE_NAMES = {"en": "English", "gu": "Gujarati"}
+
 
 @dataclass
 class OnboardingResult:
@@ -88,7 +90,7 @@ def handle_onboarding_reply(user: User, body: str) -> list[str]:
         user.language = choice
         user.onboarding_step = STEP_BROADCAST_OPTIN
         return [
-            get_message("language_confirmed", choice),
+            get_message("language_confirmed", choice, language_name=_LANGUAGE_NAMES[choice]),
             get_message("ask_broadcast_optin", choice),
         ]
 

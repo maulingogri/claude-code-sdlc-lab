@@ -6,7 +6,7 @@
     "en": "Which language would you like to use?\nReply 1 for English\nReply 2 for ગુજરાતી"
   },
   "language_confirmed": {
-    "en": "Great, we'll continue in English."
+    "en": "Great, we'll continue in {language_name}."
   },
   "invalid_language_choice": {
     "en": "Sorry, I didn't understand that. Please reply 1 for English or 2 for ગુજરાતી."

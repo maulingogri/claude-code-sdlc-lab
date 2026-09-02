@@ -107,11 +107,13 @@ def test_set_vow_opt_in_matches_current_schema():
     session.close()
 
 
-def test_translate_to_gujarati_matches_current_schema():
-    # No GOOGLE_TRANSLATE_API_KEY in the test environment, so this exercises
-    # the cache-miss + no-key fallback path rather than a real API call —
-    # the point of this test is that it queries/writes the translation_cache
-    # table without raising, i.e. the schema still matches.
+def test_translate_to_gujarati_matches_current_schema(monkeypatch):
+    # Explicitly forced empty here rather than relying on the ambient .env
+    # being blank — this exercises the cache-miss + no-key fallback path
+    # rather than a real API call; the point of this test is that it
+    # queries/writes the translation_cache table without raising, i.e. the
+    # schema still matches.
+    monkeypatch.delenv("GOOGLE_TRANSLATE_API_KEY", raising=False)
     assert data.translate_to_gujarati("Hello") == "Hello"
 
 

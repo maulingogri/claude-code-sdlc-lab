@@ -7,8 +7,8 @@ from app.translation import translate_to_gujarati
 
 
 def test_translate_returns_text_unchanged_without_a_key():
-    assert settings.google_translate_api_key == ""
-    assert translate_to_gujarati("Hello") == "Hello"
+    with patch.object(settings, "google_translate_api_key", ""):
+        assert translate_to_gujarati("Hello") == "Hello"
 
 
 def test_translate_returns_text_unchanged_for_empty_string():
