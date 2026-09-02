@@ -279,6 +279,8 @@ def broadcast_tab(
                 "Check Twilio credentials and server logs, then try again."
             )
             flash_type = "error"
+        elif sent == 0:
+            flash = "No one is opted in to daily broadcasts yet — nothing was sent."
         elif failed:
             flash = f"Sent to {sent} recipient(s), but failed for {failed}. Check server logs for details."
             flash_type = "error"

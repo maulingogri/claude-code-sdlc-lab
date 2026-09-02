@@ -124,8 +124,8 @@
     "gu": "\n\nગઈકાલની તપસ્યા સન્માન યાદી: {names}"
   },
   "agent_error_fallback": {
-    "en": "Sorry, I had trouble processing that just now. Please try again in a moment.",
-    "gu": "માફ કરશો, હમણાં પ્રક્રિયામાં તકલીફ પડી. કૃપા કરી થોડી વાર પછી ફરી પ્રયાસ કરો."
+    "en": "That's taking longer than usual — it may have already gone through. If you don't see a confirmation shortly, please send it again.",
+    "gu": "આમાં સામાન્ય કરતાં વધુ સમય લાગી રહ્યો છે — તે કદાચ પહેલેથી જ થઈ ગયું હોય. જો તમને ટૂંક સમયમાં પુષ્ટિ ન દેખાય, તો કૃપા કરી ફરી મોકલો."
   },
   "escalation_ack": {
     "en": "Great question — let me check with the Sangh and get back to you soon.",

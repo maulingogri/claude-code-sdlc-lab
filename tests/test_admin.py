@@ -340,3 +340,31 @@ def test_broadcast_send_total_failure_does_not_mark_sent():
         flash_response = client.get("/admin/broadcast?sent=0&failed=1", auth=AUTH)
         assert "Send failed for all 1 recipient" in flash_response.text
         assert 'class="flash flash-error"' in flash_response.text
+
+
+def test_broadcast_send_with_no_recipients_shows_clear_message_not_false_success():
+    today = datetime.date.today()
+    session = get_session()
+    session.add(
+        Broadcast(
+            date=today,
+            day_number=1,
+            theme_en="Compassion",
+            theme_gu="કરુણા",
+            pratikraman_timing="7:00 PM",
+        )
+    )
+    session.commit()
+    session.close()
+
+    with patch("app.broadcast.send_whatsapp_message") as mock_send:
+        with TestClient(app) as client:
+            send_response = client.post("/admin/broadcast/send", auth=AUTH, follow_redirects=False)
+        assert send_response.headers["location"] == "/admin/broadcast?sent=0&failed=0"
+        mock_send.assert_not_called()
+
+    with TestClient(app) as client:
+        flash_response = client.get("/admin/broadcast?sent=0&failed=0", auth=AUTH)
+        assert "No one is opted in" in flash_response.text
+        assert "Sent successfully to 0" not in flash_response.text
+        assert 'class="flash flash-error"' not in flash_response.text

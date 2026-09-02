@@ -35,7 +35,7 @@ def test_agent_failure_falls_back_to_error_message(monkeypatch):
     with TestClient(app) as client:
         _onboard(client)
         response = client.post("/webhook/twilio", data={"From": PHONE, "Body": "I fasted today"})
-        assert "trouble processing" in response.text.lower()
+        assert "taking longer than usual" in response.text.lower()
 
 
 def test_deterministic_menu_used_when_no_anthropic_key(monkeypatch):
