@@ -7,13 +7,10 @@ from app.models import Dependent, FastingLog, Reflection, User
 from app.timeutils import today_in_tz
 
 FLOW_FAST_TYPE = "fast_type"
+FLOW_FAST_FOR_WHOM = "fast_for_whom"
 FLOW_FAST_NOTE = "fast_note"
 FLOW_REFLECTION_TEXT = "reflection_text"
-FLOW_FAMILY_NAME = "family_name"
-FLOW_FAMILY_ACTION = "family_action"
-FLOW_FAMILY_FAST_TYPE = "family_fast_type"
-FLOW_FAMILY_FAST_NOTE = "family_fast_note"
-FLOW_FAMILY_REFLECTION_TEXT = "family_reflection_text"
+FLOW_REFLECTION_FOR_WHOM = "reflection_for_whom"
 
 # An abandoned flow (user never sent a note, then went quiet) shouldn't
 # silently swallow a much-later, unrelated message as if it were the
@@ -23,6 +20,7 @@ _FLOW_EXPIRY = datetime.timedelta(minutes=30)
 
 _CANCEL_VALUES = {"cancel", "રદ"}
 _SKIP_VALUES = {"skip", "no", "no note", "-"}
+_SELF_VALUES = {"you", "me", "myself", "self"}
 
 _MENU_CHOICES = {
     "1": FLOW_FAST_TYPE,
@@ -33,12 +31,10 @@ _MENU_CHOICES = {
     "reflect": FLOW_REFLECTION_TEXT,
     "reflection": FLOW_REFLECTION_TEXT,
     "ચિંતન": FLOW_REFLECTION_TEXT,
-    "3": FLOW_FAMILY_NAME,
-    "family": FLOW_FAMILY_NAME,
 }
 
-_MENU_KEYWORDS = {"menu", "help", "5", "મેનુ"}
-_VOW_TOGGLE_VALUES = {"4", "vow"}
+_MENU_KEYWORDS = {"menu", "help", "4", "મેનુ"}
+_VOW_TOGGLE_VALUES = {"3", "vow"}
 
 
 def _is_cancel(body: str) -> bool:
@@ -76,9 +72,9 @@ def _menu_text(user: User, lang: str) -> str:
 
 def handle_post_onboarding_message(session: Session, user: User, body: str) -> list[str]:
     """Route a free-form message from an onboarded user: continue an
-    in-progress flow (fast/reflection/family-member entry), start a new one
-    from the menu, toggle the daily vow, or show the menu. Mutates `user`
-    and writes rows via `session`; caller commits."""
+    in-progress flow (fast/reflection entry), start a new one from the
+    menu, toggle the daily vow, or show the menu. Mutates `user` and
+    writes rows via `session`; caller commits."""
     lang = user.language or "en"
 
     if user.active_flow is not None and _flow_expired(user):
@@ -122,8 +118,6 @@ def _handle_menu_selection(session: Session, user: User, body: str, lang: str) -
         return [get_message("ask_fast_type", lang)]
     if flow == FLOW_REFLECTION_TEXT:
         return [get_message("ask_reflection_text", lang)]
-    if flow == FLOW_FAMILY_NAME:
-        return [get_message("ask_family_member_name", lang)]
     raise AssertionError(f"unhandled flow {flow!r}")  # pragma: no cover
 
 
@@ -148,13 +142,27 @@ def _continue_flow(session: Session, user: User, body: str, lang: str) -> list[s
         fast_type = body.strip()
         if not fast_type:
             return [get_message("ask_fast_type", lang)]
-        log = FastingLog(
-            user_id=user.id,
-            date=today_in_tz(user.timezone),
-            fast_type=fast_type,
-        )
+        log = FastingLog(user_id=user.id, date=today_in_tz(user.timezone), fast_type=fast_type)
         session.add(log)
         session.flush()
+        _start_flow(user, FLOW_FAST_FOR_WHOM, row_id=log.id)
+        return [get_message("ask_for_whom", lang)]
+
+    if step == FLOW_FAST_FOR_WHOM:
+        log = (
+            session.query(FastingLog)
+            .filter(FastingLog.id == user.active_flow_row_id, FastingLog.user_id == user.id)
+            .one_or_none()
+        )
+        if log is None:  # row was deleted out from under the flow — shouldn't happen, but don't crash
+            _clear_flow(user)
+            return [_menu_text(user, lang)]
+        for_whom = body.strip()
+        if not for_whom:
+            return [get_message("ask_for_whom", lang)]
+        if for_whom.lower() not in _SELF_VALUES:
+            dependent = _get_or_create_dependent(session, user, for_whom)
+            log.dependent_id = dependent.id
         _start_flow(user, FLOW_FAST_NOTE, row_id=log.id)
         return [get_message("ask_fast_note", lang)]
 
@@ -165,94 +173,43 @@ def _continue_flow(session: Session, user: User, body: str, lang: str) -> list[s
             .one_or_none()
         )
         _clear_flow(user)
-        if log is None:  # row was deleted out from under the flow — shouldn't happen, but don't crash
+        if log is None:
             return [_menu_text(user, lang)]
         if not _is_skip(body):
             log.note = body.strip()
+        if log.dependent_id is not None:
+            dependent = session.get(Dependent, log.dependent_id)
+            return [get_message("family_fast_logged_ack", lang, name=dependent.name, fast_type=log.fast_type)]
         return [get_message("fast_logged_ack", lang, fast_type=log.fast_type)]
 
     if step == FLOW_REFLECTION_TEXT:
         text = body.strip()
         if not text:
             return [get_message("ask_reflection_text", lang)]
-        session.add(Reflection(user_id=user.id, date=today_in_tz(user.timezone), text=text))
-        _clear_flow(user)
-        return [get_message("reflection_saved_ack", lang)]
-
-    if step == FLOW_FAMILY_NAME:
-        name = body.strip()
-        if not name:
-            return [get_message("ask_family_member_name", lang)]
-        dependent = _get_or_create_dependent(session, user, name)
-        _start_flow(user, FLOW_FAMILY_ACTION, dependent_id=dependent.id)
-        return [get_message("ask_family_member_action", lang, name=dependent.name)]
-
-    if step == FLOW_FAMILY_ACTION:
-        dependent = session.get(Dependent, user.active_flow_dependent_id)
-        if dependent is None:
-            _clear_flow(user)
-            return [_menu_text(user, lang)]
-        choice = body.strip().lower()
-        if choice in {"1", "fast"}:
-            _start_flow(user, FLOW_FAMILY_FAST_TYPE, dependent_id=dependent.id)
-            return [get_message("ask_fast_type", lang)]
-        if choice in {"2", "reflect", "reflection"}:
-            _start_flow(user, FLOW_FAMILY_REFLECTION_TEXT, dependent_id=dependent.id)
-            return [get_message("ask_reflection_text", lang)]
-        return [get_message("invalid_family_member_action", lang)]
-
-    if step == FLOW_FAMILY_FAST_TYPE:
-        dependent = session.get(Dependent, user.active_flow_dependent_id)
-        fast_type = body.strip()
-        if dependent is None:
-            _clear_flow(user)
-            return [_menu_text(user, lang)]
-        if not fast_type:
-            return [get_message("ask_fast_type", lang)]
-        log = FastingLog(
-            user_id=user.id,
-            dependent_id=dependent.id,
-            date=today_in_tz(user.timezone),
-            fast_type=fast_type,
-        )
-        session.add(log)
+        reflection = Reflection(user_id=user.id, date=today_in_tz(user.timezone), text=text)
+        session.add(reflection)
         session.flush()
-        _start_flow(user, FLOW_FAMILY_FAST_NOTE, row_id=log.id, dependent_id=dependent.id)
-        return [get_message("ask_fast_note", lang)]
+        _start_flow(user, FLOW_REFLECTION_FOR_WHOM, row_id=reflection.id)
+        return [get_message("ask_for_whom", lang)]
 
-    if step == FLOW_FAMILY_FAST_NOTE:
-        log = (
-            session.query(FastingLog)
-            .filter(FastingLog.id == user.active_flow_row_id, FastingLog.user_id == user.id)
+    if step == FLOW_REFLECTION_FOR_WHOM:
+        reflection = (
+            session.query(Reflection)
+            .filter(Reflection.id == user.active_flow_row_id, Reflection.user_id == user.id)
             .one_or_none()
         )
-        dependent = session.get(Dependent, user.active_flow_dependent_id)
-        _clear_flow(user)
-        if log is None or dependent is None:
-            return [_menu_text(user, lang)]
-        if not _is_skip(body):
-            log.note = body.strip()
-        return [
-            get_message(
-                "family_fast_logged_ack", lang, name=dependent.name, fast_type=log.fast_type
-            )
-        ]
-
-    if step == FLOW_FAMILY_REFLECTION_TEXT:
-        dependent = session.get(Dependent, user.active_flow_dependent_id)
-        text = body.strip()
-        if dependent is None:
+        if reflection is None:
             _clear_flow(user)
             return [_menu_text(user, lang)]
-        if not text:
-            return [get_message("ask_reflection_text", lang)]
-        session.add(
-            Reflection(
-                user_id=user.id, dependent_id=dependent.id, date=today_in_tz(user.timezone), text=text
-            )
-        )
+        for_whom = body.strip()
+        if not for_whom:
+            return [get_message("ask_for_whom", lang)]
         _clear_flow(user)
-        return [get_message("family_reflection_saved_ack", lang, name=dependent.name)]
+        if for_whom.lower() not in _SELF_VALUES:
+            dependent = _get_or_create_dependent(session, user, for_whom)
+            reflection.dependent_id = dependent.id
+            return [get_message("family_reflection_saved_ack", lang, name=dependent.name)]
+        return [get_message("reflection_saved_ack", lang)]
 
     # Unknown/stale flow value — reset rather than get the user stuck.
     _clear_flow(user)

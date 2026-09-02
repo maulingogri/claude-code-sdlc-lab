@@ -28,9 +28,9 @@ def test_personal_features_off_notice_when_opted_out():
 
 
 def test_menu_and_vow_toggle_work_even_when_opted_out():
-    """Personal features (fast/reflection/family logging) require opt-in,
-    but seeing the menu and toggling the vow don't — the vow isn't the
-    same kind of personal data."""
+    """Personal features (fast/reflection logging) require opt-in, but
+    seeing the menu and toggling the vow don't — the vow isn't the same
+    kind of personal data."""
     session = get_session()
     try:
         user = _onboarded_user(session, personal_opt_in=False)
@@ -38,7 +38,7 @@ def test_menu_and_vow_toggle_work_even_when_opted_out():
         menu_replies = handle_post_onboarding_message(session, user, "menu")
         assert "log a fast" in menu_replies[0].lower()
 
-        vow_replies = handle_post_onboarding_message(session, user, "4")
+        vow_replies = handle_post_onboarding_message(session, user, "3")
         assert user.vow_opt_in is True
         assert "vow" in vow_replies[0].lower()
     finally:
@@ -67,14 +67,18 @@ def test_menu_keyword_shows_menu():
         session.close()
 
 
-def test_log_fast_flow_with_note():
+def test_log_fast_flow_for_self_with_note():
     session = get_session()
     try:
         user = _onboarded_user(session)
         handle_post_onboarding_message(session, user, "1")
         assert user.active_flow == "fast_type"
 
-        handle_post_onboarding_message(session, user, "Upvas")
+        replies = handle_post_onboarding_message(session, user, "Upvas")
+        assert user.active_flow == "fast_for_whom"
+        assert "is this for you" in replies[0].lower()
+
+        handle_post_onboarding_message(session, user, "you")
         assert user.active_flow == "fast_note"
 
         replies = handle_post_onboarding_message(session, user, "Felt peaceful today")
@@ -97,6 +101,7 @@ def test_log_fast_flow_skip_note():
         user = _onboarded_user(session)
         handle_post_onboarding_message(session, user, "fast")
         handle_post_onboarding_message(session, user, "Ekasana")
+        handle_post_onboarding_message(session, user, "myself")
         handle_post_onboarding_message(session, user, "skip")
         session.commit()
 
@@ -107,44 +112,19 @@ def test_log_fast_flow_skip_note():
         session.close()
 
 
-def test_log_reflection_flow():
+def test_log_fast_flow_for_family_member():
     session = get_session()
     try:
         user = _onboarded_user(session)
-        handle_post_onboarding_message(session, user, "2")
-        assert user.active_flow == "reflection_text"
-
-        replies = handle_post_onboarding_message(session, user, "Grateful for community today.")
-        session.commit()
-
-        assert user.active_flow is None
-        assert "saved" in replies[0].lower()
-        reflection = session.query(Reflection).filter(Reflection.user_id == user.id).one()
-        assert reflection.text == "Grateful for community today."
-    finally:
-        session.close()
-
-
-def test_family_member_fast_flow_with_note():
-    session = get_session()
-    try:
-        user = _onboarded_user(session)
-        handle_post_onboarding_message(session, user, "3")
-        assert user.active_flow == "family_name"
-
-        handle_post_onboarding_message(session, user, "Grandma Shah")
-        assert user.active_flow == "family_action"
-
-        handle_post_onboarding_message(session, user, "1")  # fast
-        assert user.active_flow == "family_fast_type"
-
+        handle_post_onboarding_message(session, user, "1")
         handle_post_onboarding_message(session, user, "Upvas")
-        assert user.active_flow == "family_fast_note"
+
+        replies = handle_post_onboarding_message(session, user, "Grandma Shah")
+        assert user.active_flow == "fast_note"
 
         replies = handle_post_onboarding_message(session, user, "Felt strong")
         session.commit()
 
-        assert user.active_flow is None
         assert "Grandma Shah" in replies[0]
         assert "Upvas" in replies[0]
 
@@ -158,16 +138,36 @@ def test_family_member_fast_flow_with_note():
         session.close()
 
 
-def test_family_member_reflection_flow():
+def test_log_reflection_flow_for_self():
     session = get_session()
     try:
         user = _onboarded_user(session)
-        handle_post_onboarding_message(session, user, "3")
-        handle_post_onboarding_message(session, user, "Little Priya")
-        handle_post_onboarding_message(session, user, "2")  # reflection
-        assert user.active_flow == "family_reflection_text"
+        handle_post_onboarding_message(session, user, "2")
+        assert user.active_flow == "reflection_text"
 
-        replies = handle_post_onboarding_message(session, user, "Priya enjoyed the story today.")
+        replies = handle_post_onboarding_message(session, user, "Grateful for community today.")
+        assert user.active_flow == "reflection_for_whom"
+
+        replies = handle_post_onboarding_message(session, user, "you")
+        session.commit()
+
+        assert user.active_flow is None
+        assert "saved" in replies[0].lower()
+        reflection = session.query(Reflection).filter(Reflection.user_id == user.id).one()
+        assert reflection.text == "Grateful for community today."
+        assert reflection.dependent_id is None
+    finally:
+        session.close()
+
+
+def test_log_reflection_flow_for_family_member():
+    session = get_session()
+    try:
+        user = _onboarded_user(session)
+        handle_post_onboarding_message(session, user, "2")
+        handle_post_onboarding_message(session, user, "Priya enjoyed the story today.")
+
+        replies = handle_post_onboarding_message(session, user, "Little Priya")
         session.commit()
 
         assert "Little Priya" in replies[0]
@@ -182,19 +182,17 @@ def test_family_member_reuses_existing_dependent_by_name():
     session = get_session()
     try:
         user = _onboarded_user(session)
-        handle_post_onboarding_message(session, user, "3")
-        handle_post_onboarding_message(session, user, "Grandma Shah")
         handle_post_onboarding_message(session, user, "1")
         handle_post_onboarding_message(session, user, "Upvas")
+        handle_post_onboarding_message(session, user, "Grandma Shah")
         handle_post_onboarding_message(session, user, "skip")
         session.commit()
 
         # Log a second entry for the same family member — should reuse
         # the same Dependent row, not create a second one.
-        handle_post_onboarding_message(session, user, "3")
-        handle_post_onboarding_message(session, user, "Grandma Shah")
         handle_post_onboarding_message(session, user, "2")
         handle_post_onboarding_message(session, user, "A quiet, peaceful day.")
+        handle_post_onboarding_message(session, user, "Grandma Shah")
         session.commit()
 
         dependents = session.query(Dependent).filter(Dependent.guardian_id == user.id).all()
@@ -238,6 +236,8 @@ def test_fast_note_attaches_to_the_row_that_started_the_flow():
         handle_post_onboarding_message(session, user, "1")
         handle_post_onboarding_message(session, user, "Upvas")
         first_log_id = user.active_flow_row_id
+        handle_post_onboarding_message(session, user, "you")
+        assert user.active_flow_row_id == first_log_id
         session.commit()
 
         # A second, unrelated fast log appears for this user before they
@@ -268,6 +268,7 @@ def test_abandoned_flow_expires_instead_of_swallowing_a_later_message():
         user = _onboarded_user(session)
         handle_post_onboarding_message(session, user, "1")
         handle_post_onboarding_message(session, user, "Upvas")
+        handle_post_onboarding_message(session, user, "you")
         assert user.active_flow == "fast_note"
         session.commit()
 

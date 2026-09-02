@@ -32,14 +32,17 @@ def test_full_onboarding_conversation_via_webhook():
         xml = _send(client, "1")  # English
         assert "daily Paryushan updates" in xml
 
-        xml = _send(client, "yes")  # broadcast opt-in
+        xml = _send(client, "YES Test User")  # broadcast opt-in + name, combined
         assert "personal features" in xml.lower()
 
         xml = _send(client, "yes")  # personal opt-in
         assert "recognition" in xml.lower()
 
         xml = _send(client, "no")  # public recognition opt-in
-        assert "all set" in xml.lower()
+        assert "family members" in xml.lower()
+
+        xml = _send(client, "none")  # no family members to log for
+        assert "onboarding complete" in xml.lower()
 
         # Onboarding complete — unrecognized free text falls back to the menu.
         xml = _send(client, "when is the pratikraman?")
@@ -50,6 +53,8 @@ def test_full_onboarding_conversation_via_webhook():
         xml = _send(client, "1")
         assert "what type of fast" in xml.lower()
         xml = _send(client, "Upvas")
+        assert "is this for you" in xml.lower()
+        xml = _send(client, "you")
         assert "add a note" in xml.lower()
         xml = _send(client, "skip")
         assert "fast logged for today (upvas)" in xml.lower()

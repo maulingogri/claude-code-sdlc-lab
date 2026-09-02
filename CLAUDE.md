@@ -20,23 +20,44 @@ broadcasts with personal features, plus an admin dashboard.
   chat functionality for these — a group is visible to all members, which
   conflicts with personal features even with the admin-visibility
   disclosure.
-- **Whatsapp messages to Louisville Sangh Group:** Sending the daily broadcast into
-  the existing Sangh WhatsApp group as an extra recipient.
+- **Whatsapp messages to Louisville Sangh Group:** the WhatsApp Business
+  API has no way to post directly into a group chat, so the daily
+  broadcast splits into two sends: **Individual** (personalized, to every
+  opted-in user — includes what they/their family logged) and **Group**
+  (community-only content, no individual detail) sent to whichever
+  user(s) are flagged as the group relay in the admin dashboard, who
+  manually forward it into the real Sangh WhatsApp group.
 
 ## Onboarding Flow
 1. Greeting
 2. Language choice: English / ગુજરાતી
-3. Broadcast opt-in: daily updates (timings, announcements)?
+3. Broadcast opt-in + name, combined in one message/reply (e.g. "YES
+   Bhavesh Shah" / "NO Bhavesh Shah"): daily updates (timings,
+   announcements) are a low-stakes preference, and a name is needed
+   either way — everyone provides one, used to identify them (as the
+   head of their household) in the admin dashboard, and in the
+   recognition list if opted in below. Kept as one step to save a round
+   trip; NOT merged with personal features or recognition below, since
+   those carry their own distinct consent disclosures
 4. Personal features opt-in: fasting log, private reflections — with the
    disclosure that Sangh admins may view these
 5. Public recognition opt-in (separate, optional): share your name in the
    daily group announcement of who fasted the previous day — off by
    default, distinct from the admin-visibility opt-in above
+6. Family members (only if personal features are on): name any family
+   members (young children, elders) they'll be logging fasts or vows for
+   — comma-separated names, or none. Creates their `Dependent` rows
+   up front rather than lazily on first log
+7. Explicit "Onboarding complete!" confirmation, closing the flow
 
 ## Daily Loop (during the festival)
-- Morning broadcast (Twilio template, per language): day number, theme,
-  local Pratikraman timing, announcements, and — for users who opted in
-  to public recognition — a list of names who fasted the previous day
+- Morning broadcast, split into two sends (see Chat Architecture above):
+  - **Individual** (per user, personalized): day number, theme, local
+    Pratikraman timing, announcements, the public recognition list (if
+    any), what the user and their family logged the previous day, and
+    their daily vow if opted in
+  - **Group** (to relay-flagged user(s) only): the same community content
+    minus the individual-detail sections, meant for manual reposting
 - Free-form replies anytime within the 24h window:
   - Log a fast (type + optional note) — for yourself or a family member
     (young child, elder, etc.) who doesn't message the bot directly
@@ -72,7 +93,9 @@ Scope is the 8-day Paryushan period, ending at Samvatsari. Do not add
 ```
 users
   id, phone, language (en/gu), broadcast_opt_in, personal_opt_in,
-  public_recognition_optin, vow_opt_in, onboarding_step, timezone
+  public_recognition_optin, vow_opt_in, is_group_relay (admin-assigned:
+  receives the separate Group broadcast to manually relay), onboarding_step,
+  timezone
 
 dependents
   id, guardian_id, name — a family member (young child, elder, etc.) who
@@ -103,7 +126,9 @@ faq
   id, question_en, question_gu, answer_en, answer_gu
 
 broadcasts
-  id, date, theme, message_id, sent_at
+  id, date, day_number, individual_message_en, group_message_en,
+  message_id, sent_at — English-only free-text drafts per day; Gujarati
+  is auto-drafted via Google Translate at send time, not stored
 ```
 
 ## Message Catalog & Translation
@@ -126,8 +151,8 @@ candidates): admins write English, Gujarati is auto-drafted.
 |---|---|
 | **Inbox** | Unanswered/escalated questions, reply box, "Add to FAQ" flag |
 | **Content** | Edit daily broadcasts, Sangh directions/logistics, FAQ entries, and the daily-vow pool (admin approval required before a vow goes to any user) |
-| **Users** | List of users (language, opt-ins); drill into individual fasting logs, reflections, and logged-for family members |
-| **Broadcast** | Preview and trigger/schedule the next daily message; also send a one-off custom message to the Sangh WhatsApp group |
+| **Users** | List of users (language, opt-ins); toggle who's flagged as the group relay; drill into individual fasting logs, reflections, and logged-for family members |
+| **Broadcast** | Preview and trigger/schedule the next daily Individual + Group messages; also send a one-off custom message to whoever is flagged as the group relay |
 
 - Auth-gated with a single shared admin login (no per-admin accounts)
 - No public route should ever expose user data

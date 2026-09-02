@@ -11,19 +11,20 @@
       margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
       background: #f7f7f5; color: #1a1a1a;
     }
-    header {
-      background: #fff; border-bottom: 1px solid #e0e0e0; padding: 0 24px;
-      display: flex; align-items: center; gap: 24px;
+    .layout { display: flex; align-items: flex-start; min-height: 100vh; }
+    .sidebar {
+      width: 220px; flex-shrink: 0; background: #fff; border-right: 1px solid #e0e0e0;
+      padding: 20px 0; position: sticky; top: 0; height: 100vh; overflow-y: auto;
     }
-    header h1 { font-size: 16px; font-weight: 600; margin: 0; padding: 16px 0; white-space: nowrap; }
-    nav { display: flex; gap: 4px; }
+    .sidebar h1 { font-size: 15px; font-weight: 600; margin: 0 20px 20px; line-height: 1.35; }
+    nav { display: flex; flex-direction: column; gap: 2px; }
     nav a {
-      display: block; padding: 16px 14px; text-decoration: none; color: #555;
-      border-bottom: 2px solid transparent; font-size: 14px;
+      display: block; padding: 10px 20px; text-decoration: none; color: #555;
+      border-left: 3px solid transparent; font-size: 14px;
     }
-    nav a.active { color: #1a1a1a; border-bottom-color: #b8452f; font-weight: 600; }
-    nav a:hover { color: #1a1a1a; }
-    main { max-width: 960px; margin: 0 auto; padding: 24px; }
+    nav a.active { color: #1a1a1a; border-left-color: #b8452f; background: #fbf1ee; font-weight: 600; }
+    nav a:hover { color: #1a1a1a; background: #fafafa; }
+    main { flex: 1; min-width: 0; max-width: 1000px; padding: 24px; }
     h2 { font-size: 20px; margin: 0 0 16px; }
     h3 { font-size: 15px; margin: 24px 0 8px; color: #444; }
     .card {
@@ -65,18 +66,20 @@
   </style>
 </head>
 <body>
-  <header>
-    <h1>Louisville Sangh Paryushan — Admin</h1>
-    <nav>
-      <a href="/admin/inbox" class="{{ 'active' if active_tab == 'inbox' }}">Inbox</a>
-      <a href="/admin/content" class="{{ 'active' if active_tab == 'content' }}">Content</a>
-      <a href="/admin/users" class="{{ 'active' if active_tab == 'users' }}">Users</a>
-      <a href="/admin/broadcast" class="{{ 'active' if active_tab == 'broadcast' }}">Broadcast</a>
-    </nav>
-  </header>
-  <main>
-    {% if flash %}<div class="flash{{ ' flash-error' if flash_type == 'error' else '' }}">{{ flash }}</div>{% endif %}
-    {% block content %}{% endblock %}
-  </main>
+  <div class="layout">
+    <aside class="sidebar">
+      <h1>Louisville Sangh Paryushan — Admin</h1>
+      <nav>
+        <a href="/admin/users" class="{{ 'active' if active_tab == 'users' }}">Users</a>
+        <a href="/admin/inbox" class="{{ 'active' if active_tab == 'inbox' }}">Inbox</a>
+        <a href="/admin/content" class="{{ 'active' if active_tab == 'content' }}">Content</a>
+        <a href="/admin/broadcast" class="{{ 'active' if active_tab == 'broadcast' }}">Broadcast</a>
+      </nav>
+    </aside>
+    <main>
+      {% if flash %}<div class="flash{{ ' flash-error' if flash_type == 'error' else '' }}">{{ flash }}</div>{% endif %}
+      {% block content %}{% endblock %}
+    </main>
+  </div>
 </body>
 </html>

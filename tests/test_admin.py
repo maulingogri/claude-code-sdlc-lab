@@ -160,35 +160,19 @@ def test_add_to_faq_flow():
     session.close()
 
 
-def test_content_broadcast_create_and_edit():
+def test_content_individual_broadcast_create_and_edit():
     with TestClient(app) as client:
         create_response = client.post(
-            "/admin/content/broadcast",
-            data={
-                "date": "2026-09-08",
-                "day_number": "1",
-                "theme_en": "Compassion",
-                "theme_gu": "કરુણા",
-                "pratikraman_timing": "7:00 PM",
-                "announcements_en": "Arrive early.",
-                "announcements_gu": "",
-            },
+            "/admin/content/broadcast/individual",
+            data={"date": "2026-09-08", "message_en": "Compassion."},
             auth=AUTH,
             follow_redirects=False,
         )
         assert create_response.status_code == 303
 
         edit_response = client.post(
-            "/admin/content/broadcast",
-            data={
-                "date": "2026-09-08",
-                "day_number": "1",
-                "theme_en": "Compassion (updated)",
-                "theme_gu": "કરુણા",
-                "pratikraman_timing": "7:30 PM",
-                "announcements_en": "",
-                "announcements_gu": "",
-            },
+            "/admin/content/broadcast/individual",
+            data={"date": "2026-09-08", "message_en": "Compassion (updated)."},
             auth=AUTH,
             follow_redirects=False,
         )
@@ -197,8 +181,55 @@ def test_content_broadcast_create_and_edit():
     session = get_session()
     broadcasts = session.query(Broadcast).all()
     assert len(broadcasts) == 1  # updated in place, not duplicated
-    assert broadcasts[0].theme_en == "Compassion (updated)"
-    assert broadcasts[0].pratikraman_timing == "7:30 PM"
+    assert broadcasts[0].individual_message_en == "Compassion (updated)."
+    assert broadcasts[0].day_number == 1  # derived from the date, not entered by hand
+    session.close()
+
+
+def test_content_group_broadcast_create_and_edit():
+    with TestClient(app) as client:
+        create_response = client.post(
+            "/admin/content/broadcast/group",
+            data={"date": "2026-09-08", "message_en": "Group update."},
+            auth=AUTH,
+            follow_redirects=False,
+        )
+        assert create_response.status_code == 303
+
+        edit_response = client.post(
+            "/admin/content/broadcast/group",
+            data={"date": "2026-09-08", "message_en": "Group update (updated)."},
+            auth=AUTH,
+            follow_redirects=False,
+        )
+        assert edit_response.status_code == 303
+
+    session = get_session()
+    broadcasts = session.query(Broadcast).all()
+    assert len(broadcasts) == 1  # updated in place, not duplicated
+    assert broadcasts[0].group_message_en == "Group update (updated)."
+    assert broadcasts[0].day_number == 1
+    session.close()
+
+
+def test_content_individual_and_group_broadcast_share_the_same_row():
+    with TestClient(app) as client:
+        client.post(
+            "/admin/content/broadcast/individual",
+            data={"date": "2026-09-08", "message_en": "Individual text."},
+            auth=AUTH,
+        )
+        client.post(
+            "/admin/content/broadcast/group",
+            data={"date": "2026-09-08", "message_en": "Group text."},
+            auth=AUTH,
+        )
+
+    session = get_session()
+    broadcasts = session.query(Broadcast).all()
+    assert len(broadcasts) == 1
+    assert broadcasts[0].individual_message_en == "Individual text."
+    assert broadcasts[0].group_message_en == "Group text."
     session.close()
 
 
@@ -279,9 +310,8 @@ def test_broadcast_send_marks_sent_and_calls_twilio():
         Broadcast(
             date=today,
             day_number=1,
-            theme_en="Compassion",
-            theme_gu="કરુણા",
-            pratikraman_timing="7:00 PM",
+            individual_message_en="Compassion.",
+            group_message_en="Group Compassion.",
         )
     )
     session.commit()
@@ -318,9 +348,8 @@ def test_broadcast_send_total_failure_does_not_mark_sent():
         Broadcast(
             date=today,
             day_number=1,
-            theme_en="Compassion",
-            theme_gu="કરુણા",
-            pratikraman_timing="7:00 PM",
+            individual_message_en="Compassion.",
+            group_message_en="Group Compassion.",
         )
     )
     session.commit()
@@ -433,8 +462,7 @@ def test_user_detail_shows_dependents_and_their_logs():
         assert "Grandma Shah" in response.text
 
 
-def test_send_group_message_requires_configured_group_number(monkeypatch):
-    monkeypatch.setattr(settings, "sangh_group_whatsapp_number", "")
+def test_send_group_message_requires_a_relay_user():
     with TestClient(app) as client:
         response = client.post(
             "/admin/broadcast/group-message",
@@ -446,8 +474,8 @@ def test_send_group_message_requires_configured_group_number(monkeypatch):
         assert response.headers["location"] == "/admin/broadcast?group_sent=0"
 
 
-def test_send_group_message_translates_and_sends(monkeypatch):
-    monkeypatch.setattr(settings, "sangh_group_whatsapp_number", "whatsapp:+15551234567")
+def test_send_group_message_translates_and_sends_to_relay_user():
+    relay_user = _make_user(is_group_relay=True)
     with patch("app.admin.routes.translate_to_gujarati", return_value="ગુજ સંદેશ") as mock_translate:
         with patch("app.admin.routes.send_whatsapp_message") as mock_send:
             with TestClient(app) as client:
@@ -461,14 +489,14 @@ def test_send_group_message_translates_and_sends(monkeypatch):
             assert response.headers["location"] == "/admin/broadcast?group_sent=1"
             mock_translate.assert_called_once_with("Reminder: Pratikraman at 7 PM tonight.")
             mock_send.assert_called_once()
-            assert mock_send.call_args[0][0] == "whatsapp:+15551234567"
+            assert mock_send.call_args[0][0] == relay_user.phone
             sent_text = mock_send.call_args[0][1]
             assert "Reminder: Pratikraman at 7 PM tonight." in sent_text
             assert "ગુજ સંદેશ" in sent_text
 
 
-def test_send_group_message_failure_redirects_with_failure_flag(monkeypatch):
-    monkeypatch.setattr(settings, "sangh_group_whatsapp_number", "whatsapp:+15551234567")
+def test_send_group_message_failure_redirects_with_failure_flag():
+    _make_user(is_group_relay=True)
     with patch("app.admin.routes.translate_to_gujarati", return_value="ગુજ"):
         with patch("app.admin.routes.send_whatsapp_message", side_effect=RuntimeError("Twilio down")):
             with TestClient(app) as client:
@@ -482,6 +510,26 @@ def test_send_group_message_failure_redirects_with_failure_flag(monkeypatch):
             assert response.headers["location"] == "/admin/broadcast?group_sent=0"
 
 
+def test_toggle_group_relay_flips_flag():
+    user = _make_user(is_group_relay=False)
+    with TestClient(app) as client:
+        response = client.post(
+            f"/admin/users/{user.id}/toggle-group-relay", auth=AUTH, follow_redirects=False
+        )
+        assert response.status_code == 303
+
+    session = get_session()
+    assert session.get(User, user.id).is_group_relay is True
+    session.close()
+
+    with TestClient(app) as client:
+        client.post(f"/admin/users/{user.id}/toggle-group-relay", auth=AUTH)
+
+    session = get_session()
+    assert session.get(User, user.id).is_group_relay is False
+    session.close()
+
+
 def test_broadcast_send_with_no_recipients_shows_clear_message_not_false_success():
     today = datetime.date.today()
     session = get_session()
@@ -489,9 +537,8 @@ def test_broadcast_send_with_no_recipients_shows_clear_message_not_false_success
         Broadcast(
             date=today,
             day_number=1,
-            theme_en="Compassion",
-            theme_gu="કરુણા",
-            pratikraman_timing="7:00 PM",
+            individual_message_en="Compassion.",
+            group_message_en="Group Compassion.",
         )
     )
     session.commit()

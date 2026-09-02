@@ -8,6 +8,7 @@ from app.config import settings
 from app.logging_utils import hash_phone, logger
 from app.models import Broadcast, Dependent, FastingLog, User, Vow, VowAssignment
 from app.timeutils import today_in_tz
+from app.translation import translate_to_gujarati
 from app.twilio_client import send_whatsapp_message
 
 
@@ -45,23 +46,84 @@ def _recognition_names(session: Session, for_date: datetime.date) -> list[str]:
     return [name for (name,) in self_names] + [name for (name,) in dependent_names]
 
 
-def build_broadcast_text(session: Session, broadcast: Broadcast, language: str) -> str:
-    text = get_message(
-        "daily_broadcast_intro",
-        language,
-        day_number=broadcast.day_number,
-        theme=broadcast.theme_gu if language == "gu" else broadcast.theme_en,
-        pratikraman_timing=broadcast.pratikraman_timing,
-        announcements=(broadcast.announcements_gu if language == "gu" else broadcast.announcements_en)
-        or "",
+def _activity_lines_for_user(session: Session, user: User, for_date: datetime.date) -> list[str]:
+    """Fasts logged for `for_date` by this user themselves or any of their
+    family members — feeds the Individual broadcast's personal activity
+    section. Not shared with anyone else (unlike _recognition_names, this
+    doesn't require public_recognition_optin — it's the user's own data
+    being shown back to them, not published)."""
+    own_logs = (
+        session.query(FastingLog)
+        .filter(
+            FastingLog.user_id == user.id,
+            FastingLog.dependent_id.is_(None),
+            FastingLog.date == for_date,
+        )
+        .all()
     )
+    lines = [f"You: {log.fast_type}" for log in own_logs]
 
-    yesterday = broadcast.date - datetime.timedelta(days=1)
+    dependent_logs = (
+        session.query(FastingLog, Dependent.name)
+        .join(Dependent, FastingLog.dependent_id == Dependent.id)
+        .filter(Dependent.guardian_id == user.id, FastingLog.date == for_date)
+        .all()
+    )
+    lines += [f"{dep_name}: {log.fast_type}" for log, dep_name in dependent_logs]
+
+    return lines
+
+
+def _individual_activity_section(
+    session: Session, user: User, for_date: datetime.date, language: str
+) -> str:
+    lines = _activity_lines_for_user(session, user, for_date)
+    if not lines:
+        return ""
+    return get_message("individual_activity_summary", language, entries="\n".join(lines))
+
+
+def _group_relay_recipients(session: Session) -> list[User]:
+    """Users flagged (Users tab) to receive the separate Group broadcast —
+    a community-only update with no individual fasting/vow detail — so
+    they can manually relay it into the real Sangh WhatsApp group. The
+    WhatsApp Business API has no way to post into a group chat directly."""
+    return session.query(User).filter(User.is_group_relay.is_(True)).all()
+
+
+def build_individual_text(
+    session: Session, broadcast: Broadcast, user: User, yesterday: datetime.date, today: datetime.date
+) -> str:
+    """The Individual broadcast: the admin's free-text draft
+    (individual_message_en, translated at send time if the user's
+    language is Gujarati) plus three sections that can't be pre-drafted
+    because they depend on who's receiving it or change day to day —
+    yesterday's public recognition list, this user's own/family fasting
+    activity, and their vow if opted in."""
+    language = user.language or "en"
+    text = broadcast.individual_message_en or ""
+    if language == "gu":
+        text = translate_to_gujarati(text)
+
     names = _recognition_names(session, yesterday)
     if names:
         text += get_message("daily_broadcast_recognition", language, names=", ".join(names))
 
+    text += _individual_activity_section(session, user, yesterday, language)
+    text += _vow_section_for_user(session, user, today)
     return text
+
+
+def build_group_text(session: Session, broadcast: Broadcast, yesterday: datetime.date) -> str:
+    """The Group broadcast: the admin's free-text draft (group_message_en)
+    plus yesterday's public recognition list, sent as one bilingual
+    message (English + auto-drafted Gujarati) — there's only one send per
+    relay recipient, not a per-language choice like Individual has."""
+    text = broadcast.group_message_en or ""
+    names = _recognition_names(session, yesterday)
+    if names:
+        text += get_message("daily_broadcast_recognition", "en", names=", ".join(names))
+    return f"{text}\n\n---\n\n{translate_to_gujarati(text)}"
 
 
 def _pick_vow_for_user(session: Session, user: User) -> Vow | None:
@@ -91,9 +153,17 @@ def _vow_section_for_user(session: Session, user: User, today: datetime.date) ->
 
 
 def send_daily_broadcast(session: Session) -> dict[str, int]:
-    """Send today's broadcast to every opted-in user, plus the Sangh group
-    number, in each recipient's chosen language. Intended to be run once a
-    day by a Railway cron job (see scripts/run_daily_broadcast.py)."""
+    """Send two kinds of message once a day (Railway cron job — see
+    scripts/run_daily_broadcast.py):
+
+    - Individual: to every broadcast-opted-in user, in their language —
+      today's community content plus what they/their family logged
+      yesterday, plus their vow if opted in.
+    - Group: to whoever is flagged as the group relay (Users tab) —
+      today's community content only, in English, with no individual
+      detail, meant to be manually forwarded into the real Sangh
+      WhatsApp group (the Business API can't post into one directly).
+    """
     today = _today(settings.default_timezone)
     broadcast = session.query(Broadcast).filter(Broadcast.date == today).one_or_none()
 
@@ -101,13 +171,12 @@ def send_daily_broadcast(session: Session) -> dict[str, int]:
         logger.warning("no_broadcast_content_for_date date=%s", today.isoformat())
         return {"sent": 0, "failed": 0, "skipped_no_content": 1}
 
+    yesterday = today - datetime.timedelta(days=1)
     sent, failed = 0, 0
+
     users = session.query(User).filter(User.broadcast_opt_in.is_(True)).all()
     for user in users:
-        language = user.language or "en"
-        text = build_broadcast_text(session, broadcast, language) + _vow_section_for_user(
-            session, user, today
-        )
+        text = build_individual_text(session, broadcast, user, yesterday, today)
         try:
             send_whatsapp_message(user.phone, text)
             sent += 1
@@ -115,14 +184,13 @@ def send_daily_broadcast(session: Session) -> dict[str, int]:
             logger.exception("broadcast_send_failed phone_hash=%s", hash_phone(user.phone))
             failed += 1
 
-    if settings.sangh_group_whatsapp_number:
+    group_text = build_group_text(session, broadcast, yesterday)
+    for relay_user in _group_relay_recipients(session):
         try:
-            send_whatsapp_message(
-                settings.sangh_group_whatsapp_number, build_broadcast_text(session, broadcast, "en")
-            )
+            send_whatsapp_message(relay_user.phone, group_text)
             sent += 1
         except Exception:
-            logger.exception("broadcast_send_failed_group")
+            logger.exception("broadcast_send_failed_group phone_hash=%s", hash_phone(relay_user.phone))
             failed += 1
 
     if sent > 0:

@@ -11,9 +11,10 @@ PHONE = "whatsapp:+15551230000"
 def _onboard(client: TestClient) -> None:
     client.post("/webhook/twilio", data={"From": PHONE, "Body": "hi"})
     client.post("/webhook/twilio", data={"From": PHONE, "Body": "1"})  # English
-    client.post("/webhook/twilio", data={"From": PHONE, "Body": "no"})  # broadcast
+    client.post("/webhook/twilio", data={"From": PHONE, "Body": "no Test User"})  # broadcast + name
     client.post("/webhook/twilio", data={"From": PHONE, "Body": "yes"})  # personal features
     client.post("/webhook/twilio", data={"From": PHONE, "Body": "no"})  # public recognition
+    client.post("/webhook/twilio", data={"From": PHONE, "Body": "none"})  # family members
 
 
 def test_agent_path_used_when_anthropic_key_configured(monkeypatch):

@@ -8,7 +8,14 @@ from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
 from app.admin.auth import require_admin
-from app.broadcast import _today, build_broadcast_text, send_daily_broadcast
+from app.broadcast import (
+    _day_number,
+    _group_relay_recipients,
+    _today,
+    build_group_text,
+    build_individual_text,
+    send_daily_broadcast,
+)
 from app.config import settings
 from app.db import get_db
 from app.logging_utils import hash_phone, logger
@@ -153,7 +160,8 @@ def add_to_faq_submit(
 @router.get("/content")
 def content(
     request: Request,
-    edit_date: str | None = None,
+    edit_individual_date: str | None = None,
+    edit_group_date: str | None = None,
     edit_faq_id: int | None = None,
     db: Session = Depends(get_db),
 ):
@@ -162,11 +170,13 @@ def content(
     pending_vows = db.query(Vow).filter(Vow.approved.is_(False)).order_by(Vow.id.asc()).all()
     approved_vows = db.query(Vow).filter(Vow.approved.is_(True)).order_by(Vow.id.asc()).all()
 
-    edit_broadcast = None
-    if edit_date:
-        edit_broadcast = (
-            db.query(Broadcast).filter(Broadcast.date == datetime.date.fromisoformat(edit_date)).one_or_none()
-        )
+    def _broadcast_for(date_str: str | None) -> Broadcast | None:
+        if not date_str:
+            return None
+        return db.query(Broadcast).filter(Broadcast.date == datetime.date.fromisoformat(date_str)).one_or_none()
+
+    edit_individual = _broadcast_for(edit_individual_date)
+    edit_group = _broadcast_for(edit_group_date)
     edit_faq = db.get(FAQ, edit_faq_id) if edit_faq_id else None
 
     return templates.TemplateResponse(
@@ -178,35 +188,49 @@ def content(
             "faqs": faqs,
             "pending_vows": pending_vows,
             "approved_vows": approved_vows,
-            "edit_broadcast": edit_broadcast,
+            "edit_individual": edit_individual,
+            "edit_group": edit_group,
             "edit_faq": edit_faq,
         },
     )
 
 
-@router.post("/content/broadcast")
-def save_broadcast(
-    date: str = Form(...),
-    day_number: int = Form(...),
-    theme_en: str = Form(...),
-    theme_gu: str = Form(...),
-    pratikraman_timing: str = Form(...),
-    announcements_en: str = Form(""),
-    announcements_gu: str = Form(""),
-    db: Session = Depends(get_db),
-):
+def _upsert_broadcast(db: Session, date: str) -> Broadcast:
+    """day_number is always derived from the date (see broadcast._day_number)
+    rather than entered by hand — the Individual and Group forms both edit
+    the same underlying row for a date, so a manually-typed day number could
+    silently drift between the two if entered differently on each."""
     parsed_date = datetime.date.fromisoformat(date)
     broadcast = db.query(Broadcast).filter(Broadcast.date == parsed_date).one_or_none()
     if broadcast is None:
         broadcast = Broadcast(date=parsed_date)
         db.add(broadcast)
+    broadcast.day_number = _day_number(parsed_date)
+    return broadcast
 
-    broadcast.day_number = day_number
-    broadcast.theme_en = theme_en
-    broadcast.theme_gu = theme_gu
-    broadcast.pratikraman_timing = pratikraman_timing
-    broadcast.announcements_en = announcements_en
-    broadcast.announcements_gu = announcements_gu
+
+@router.post("/content/broadcast/individual")
+def save_individual_broadcast(
+    date: str = Form(...),
+    message_en: str = Form(...),
+    db: Session = Depends(get_db),
+):
+    """Admin writes English only; Gujarati is auto-drafted at send time
+    (app/translation.py), same as vows and the group message."""
+    broadcast = _upsert_broadcast(db, date)
+    broadcast.individual_message_en = message_en
+    db.commit()
+    return RedirectResponse(url="/admin/content", status_code=303)
+
+
+@router.post("/content/broadcast/group")
+def save_group_broadcast(
+    date: str = Form(...),
+    message_en: str = Form(...),
+    db: Session = Depends(get_db),
+):
+    broadcast = _upsert_broadcast(db, date)
+    broadcast.group_message_en = message_en
     db.commit()
     return RedirectResponse(url="/admin/content", status_code=303)
 
@@ -281,6 +305,18 @@ def users(request: Request, db: Session = Depends(get_db)):
     )
 
 
+@router.post("/users/{user_id}/toggle-group-relay")
+def toggle_group_relay(user_id: int, db: Session = Depends(get_db)):
+    """Flips whether this user receives the separate Group broadcast (see
+    app/broadcast.py's _group_relay_recipients) for manual relaying into
+    the real Sangh WhatsApp group."""
+    user = db.get(User, user_id)
+    if user is not None:
+        user.is_group_relay = not user.is_group_relay
+        db.commit()
+    return RedirectResponse(url="/admin/users", status_code=303)
+
+
 @router.get("/users/{user_id}")
 def user_detail(request: Request, user_id: int, db: Session = Depends(get_db)):
     user = db.get(User, user_id)
@@ -322,26 +358,41 @@ def broadcast_tab(
             flash = f"Sent successfully to {sent} recipient(s)."
     elif group_sent is not None:
         flash = (
-            "Message sent to the Sangh WhatsApp group."
+            "Message sent to the Sangh WhatsApp group relay recipient(s)."
             if group_sent
-            else "Failed to send to the Sangh WhatsApp group — check server logs."
+            else "Failed to send — no one is flagged as the group relay yet. Set one on the Users tab."
         )
         flash_type = None if group_sent else "error"
 
+    relay_users = _group_relay_recipients(db)
     context = {
         "active_tab": "broadcast",
         "today": today,
         "broadcast": broadcast,
         "flash": flash,
         "flash_type": flash_type,
-        "group_configured": bool(settings.sangh_group_whatsapp_number),
+        "group_configured": bool(relay_users),
+        "relay_users": relay_users,
     }
     if broadcast is not None:
+        yesterday = today - datetime.timedelta(days=1)
         opted_in_count = db.query(User).filter(User.broadcast_opt_in.is_(True)).count()
+        # Unpersisted stand-in users just to drive text generation for a
+        # generic preview — a real recipient's own activity/vow can't be
+        # shown here since it depends on who's actually receiving it (see
+        # build_individual_text); vow_opt_in stays False so this preview
+        # doesn't claim a vow that may not apply to any given recipient.
+        preview_user_en = User(language="en")
+        preview_user_gu = User(language="gu")
         context.update(
             {
-                "preview_en": build_broadcast_text(db, broadcast, "en"),
-                "preview_gu": build_broadcast_text(db, broadcast, "gu"),
+                "preview_individual_en": build_individual_text(
+                    db, broadcast, preview_user_en, yesterday, today
+                ),
+                "preview_individual_gu": build_individual_text(
+                    db, broadcast, preview_user_gu, yesterday, today
+                ),
+                "preview_group": build_group_text(db, broadcast, yesterday),
                 "opted_in_count": opted_in_count,
             }
         )
@@ -349,21 +400,23 @@ def broadcast_tab(
 
 
 @router.post("/broadcast/group-message")
-def send_group_message(message_en: str = Form(...)):
-    """Sends a one-off custom message to the Sangh WhatsApp group, English
-    plus an auto-drafted Gujarati translation — separate from the daily
-    broadcast content."""
-    if not settings.sangh_group_whatsapp_number:
+def send_group_message(message_en: str = Form(...), db: Session = Depends(get_db)):
+    """Sends a one-off custom message to whoever is flagged as the group
+    relay (Users tab), English plus an auto-drafted Gujarati translation —
+    separate from the daily broadcast content."""
+    relay_users = _group_relay_recipients(db)
+    if not relay_users:
         return RedirectResponse(url="/admin/broadcast?group_sent=0", status_code=303)
 
     combined = f"{message_en}\n\n---\n\n{translate_to_gujarati(message_en)}"
-    try:
-        send_whatsapp_message(settings.sangh_group_whatsapp_number, combined)
-        group_sent = 1
-    except Exception:
-        logger.exception("admin_group_message_send_failed")
-        group_sent = 0
-    return RedirectResponse(url=f"/admin/broadcast?group_sent={group_sent}", status_code=303)
+    sent_any = False
+    for relay_user in relay_users:
+        try:
+            send_whatsapp_message(relay_user.phone, combined)
+            sent_any = True
+        except Exception:
+            logger.exception("admin_group_message_send_failed phone_hash=%s", hash_phone(relay_user.phone))
+    return RedirectResponse(url=f"/admin/broadcast?group_sent={1 if sent_any else 0}", status_code=303)
 
 
 @router.post("/broadcast/send")

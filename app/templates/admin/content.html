@@ -2,58 +2,70 @@
 {% block title %}Content{% endblock %}
 {% block content %}
 <h2>Content</h2>
+<p class="muted">
+  Jump to: <a href="#individual">Individual broadcast</a> ·
+  <a href="#group">Group broadcast</a> ·
+  <a href="#faq">FAQ</a> ·
+  <a href="#vows">Vows</a>
+</p>
 
-<h3>Daily broadcasts</h3>
+<h3 id="individual">Daily individual broadcast message</h3>
+<p class="muted">Sent to every opted-in user, personalized — the recognition list, their own/family fasting activity, and their vow get appended automatically per recipient, so write just the fixed intro. English only; Gujarati is auto-drafted via Google Translate at send time.</p>
 <table>
-  <thead><tr><th>Date</th><th>Day</th><th>Theme (EN)</th><th>Pratikraman</th><th>Sent</th><th></th></tr></thead>
+  <thead><tr><th>Date</th><th>Day</th><th>Message (EN)</th><th>Sent</th><th></th></tr></thead>
   <tbody>
     {% for b in broadcasts %}
     <tr>
       <td>{{ b.date }}</td>
       <td>{{ b.day_number }}</td>
-      <td>{{ b.theme_en }}</td>
-      <td>{{ b.pratikraman_timing }}</td>
+      <td>{{ (b.individual_message_en or '')[:80] }}{{ '…' if b.individual_message_en and b.individual_message_en|length > 80 else '' }}</td>
       <td>{{ 'Yes' if b.sent_at else '—' }}</td>
-      <td><a class="row-link" href="/admin/content?edit_date={{ b.date }}">Edit</a></td>
+      <td><a class="row-link" href="/admin/content?edit_individual_date={{ b.date }}">Edit</a></td>
     </tr>
     {% else %}
-    <tr><td colspan="6" class="empty">No broadcast content yet.</td></tr>
+    <tr><td colspan="5" class="empty">No individual broadcast drafts yet.</td></tr>
     {% endfor %}
   </tbody>
 </table>
 
-<form method="post" action="/admin/content/broadcast" class="card">
-  <strong>{{ 'Edit broadcast' if edit_broadcast else 'Add a broadcast' }}</strong>
-  <label for="date">Date</label>
-  <input type="date" id="date" name="date" value="{{ edit_broadcast.date if edit_broadcast else '' }}" required>
-  <label for="day_number">Day number (1-8)</label>
-  <input type="text" id="day_number" name="day_number" value="{{ edit_broadcast.day_number if edit_broadcast else '' }}" required>
-  <div class="two-col">
-    <div>
-      <label for="theme_en">Theme (English)</label>
-      <input type="text" id="theme_en" name="theme_en" value="{{ edit_broadcast.theme_en if edit_broadcast else '' }}" required>
-    </div>
-    <div>
-      <label for="theme_gu">Theme (Gujarati)</label>
-      <input type="text" id="theme_gu" name="theme_gu" value="{{ edit_broadcast.theme_gu if edit_broadcast else '' }}" required>
-    </div>
-  </div>
-  <label for="pratikraman_timing">Pratikraman timing</label>
-  <input type="text" id="pratikraman_timing" name="pratikraman_timing" value="{{ edit_broadcast.pratikraman_timing if edit_broadcast else '' }}" required placeholder="e.g. 7:00 PM">
-  <div class="two-col">
-    <div>
-      <label for="announcements_en">Announcements (English)</label>
-      <textarea id="announcements_en" name="announcements_en" rows="2">{{ edit_broadcast.announcements_en if edit_broadcast else '' }}</textarea>
-    </div>
-    <div>
-      <label for="announcements_gu">Announcements (Gujarati)</label>
-      <textarea id="announcements_gu" name="announcements_gu" rows="2">{{ edit_broadcast.announcements_gu if edit_broadcast else '' }}</textarea>
-    </div>
-  </div>
-  <button type="submit">Save broadcast</button>
+<form method="post" action="/admin/content/broadcast/individual" class="card">
+  <strong>{{ 'Edit individual message' if edit_individual else 'Add an individual message' }}</strong>
+  <label for="individual_date">Date</label>
+  <input type="date" id="individual_date" name="date" value="{{ edit_individual.date if edit_individual else '' }}" required>
+  <label for="individual_message_en">Message (English)</label>
+  <textarea id="individual_message_en" name="message_en" rows="4" required placeholder="e.g. Jai Jinendra! Today is Day 1 of Paryushan — Ahimsa (Non-Violence &amp; Compassion). Pratikraman is at 7:00 PM.">{{ edit_individual.individual_message_en if edit_individual else '' }}</textarea>
+  <button type="submit">Save individual message</button>
 </form>
 
-<h3>FAQ</h3>
+<h3 id="group">Daily group broadcast messages</h3>
+<p class="muted">Sent as one bilingual message to whoever is flagged as the group relay (Users tab) — for them to manually forward into the real Sangh WhatsApp group. Community content only, no individual detail.</p>
+<table>
+  <thead><tr><th>Date</th><th>Day</th><th>Message (EN)</th><th>Sent</th><th></th></tr></thead>
+  <tbody>
+    {% for b in broadcasts %}
+    <tr>
+      <td>{{ b.date }}</td>
+      <td>{{ b.day_number }}</td>
+      <td>{{ (b.group_message_en or '')[:80] }}{{ '…' if b.group_message_en and b.group_message_en|length > 80 else '' }}</td>
+      <td>{{ 'Yes' if b.sent_at else '—' }}</td>
+      <td><a class="row-link" href="/admin/content?edit_group_date={{ b.date }}">Edit</a></td>
+    </tr>
+    {% else %}
+    <tr><td colspan="5" class="empty">No group broadcast drafts yet.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<form method="post" action="/admin/content/broadcast/group" class="card">
+  <strong>{{ 'Edit group message' if edit_group else 'Add a group message' }}</strong>
+  <label for="group_date">Date</label>
+  <input type="date" id="group_date" name="date" value="{{ edit_group.date if edit_group else '' }}" required>
+  <label for="group_message_en">Message (English)</label>
+  <textarea id="group_message_en" name="message_en" rows="4" required placeholder="e.g. 📢 Sangh Update — Day 1 of Paryushan: Ahimsa (Non-Violence &amp; Compassion). Pratikraman timing: 7:00 PM. Please share this with the group.">{{ edit_group.group_message_en if edit_group else '' }}</textarea>
+  <button type="submit">Save group message</button>
+</form>
+
+<h3 id="faq">FAQ</h3>
 <table>
   <thead><tr><th>Question (EN)</th><th>Answer (EN)</th><th></th></tr></thead>
   <tbody>
@@ -101,7 +113,7 @@
   <button type="submit">Save FAQ entry</button>
 </form>
 
-<h3>Daily vows — pending approval ({{ pending_vows|length }})</h3>
+<h3 id="vows">Daily vows — pending approval ({{ pending_vows|length }})</h3>
 <p class="muted">Nothing here is ever sent to a user until approved. Gujarati is auto-drafted via Google Translate — review it before approving.</p>
 {% if not pending_vows %}
   <div class="empty">No pending vows.</div>

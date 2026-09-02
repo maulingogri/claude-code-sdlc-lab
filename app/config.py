@@ -8,7 +8,6 @@ class Settings(BaseSettings):
     twilio_account_sid: str = ""
     twilio_auth_token: str = ""
     twilio_whatsapp_number: str = ""  # e.g. "whatsapp:+14155238886" (sandbox)
-    sangh_group_whatsapp_number: str = ""  # extra recipient for daily broadcast
 
     # Skip signature validation only for local dev/tests. Must be False in staging/prod.
     skip_twilio_signature_validation: bool = False

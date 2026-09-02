@@ -6,29 +6,43 @@
 {% if not broadcast %}
   <div class="empty">No broadcast content has been set for today. Add it on the <a href="/admin/content">Content</a> tab first.</div>
 {% else %}
-  <p class="muted">Day {{ broadcast.day_number }} of 8 · {{ opted_in_count }} recipient(s) opted in{{ ' · already sent at ' + broadcast.sent_at.strftime('%Y-%m-%d %H:%M UTC') if broadcast.sent_at else '' }}</p>
+  <p class="muted">
+    Day {{ broadcast.day_number }} of 8 · {{ opted_in_count }} recipient(s) opted in{{ ' · already sent at ' + broadcast.sent_at.strftime('%Y-%m-%d %H:%M UTC') if broadcast.sent_at else '' }}
+    · <a class="row-link" href="/admin/content?edit_individual_date={{ broadcast.date }}">Edit individual message</a>
+    · <a class="row-link" href="/admin/content?edit_group_date={{ broadcast.date }}">Edit group message</a>
+  </p>
 
+  <h3>Individual — personalized per recipient</h3>
+  <p class="muted">Recognition list, personal activity, and vow are appended per recipient — shown here without them, since they depend on who's receiving it.</p>
   <div class="two-col">
     <div class="card">
       <strong>English preview</strong>
-      <p style="white-space:pre-wrap">{{ preview_en }}</p>
+      <p style="white-space:pre-wrap">{{ preview_individual_en }}</p>
     </div>
     <div class="card">
       <strong>Gujarati preview</strong>
-      <p style="white-space:pre-wrap">{{ preview_gu }}</p>
+      <p style="white-space:pre-wrap">{{ preview_individual_gu }}</p>
     </div>
   </div>
 
-  <form method="post" action="/admin/broadcast/send" onsubmit="return confirm('Send today\'s broadcast to {{ opted_in_count }} recipient(s) now?')">
+  <h3>Group — for the relay to forward</h3>
+  <div class="card">
+    <p style="white-space:pre-wrap">{{ preview_group }}</p>
+  </div>
+
+  <form method="post" action="/admin/broadcast/send" onsubmit="return confirm('Send today\'s Individual message to {{ opted_in_count }} recipient(s), and the Group message to the relay, now?')">
     <button type="submit">Send now</button>
   </form>
 {% endif %}
 
 <h3>Custom message to the Sangh WhatsApp group</h3>
 {% if not group_configured %}
-  <div class="empty">SANGH_GROUP_WHATSAPP_NUMBER isn't configured — set it in .env to enable this.</div>
+  <div class="empty">No one is flagged as the group relay yet — set one on the <a href="/admin/users">Users</a> tab.</div>
 {% else %}
-  <p class="muted">Sent as English plus an auto-drafted Gujarati translation, separate from the daily broadcast.</p>
+  <p class="muted">
+    Sent as English plus an auto-drafted Gujarati translation, separate from the daily broadcast, to:
+    {% for u in relay_users %}{{ u.display_name or u.phone }}{% if not loop.last %}, {% endif %}{% endfor %}
+  </p>
   <form method="post" action="/admin/broadcast/group-message" class="card" onsubmit="return confirm('Send this message to the Sangh WhatsApp group now?')">
     <label for="message_en">Message (English)</label>
     <textarea id="message_en" name="message_en" rows="3" required placeholder="e.g. Reminder: tonight's Pratikraman starts 30 minutes earlier than usual."></textarea>

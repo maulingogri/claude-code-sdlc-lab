@@ -19,17 +19,12 @@ def test_get_message_gujarati_falls_back_to_english_without_a_translate_key():
 
 def test_get_message_templating():
     text = get_message(
-        "daily_broadcast_intro",
+        "individual_activity_summary",
         "en",
-        day_number=1,
-        theme="Compassion",
-        pratikraman_timing="7:00 PM",
-        announcements="Arrive early.",
+        entries="You: Upvas\nGrandma Shah: Ekasana",
     )
-    assert "Day 1" in text
-    assert "Compassion" in text
-    assert "7:00 PM" in text
-    assert "Arrive early." in text
+    assert "You: Upvas" in text
+    assert "Grandma Shah: Ekasana" in text
 
 
 def test_unknown_message_id_raises():

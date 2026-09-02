@@ -30,6 +30,31 @@ tab for one-off posts to the Sangh WhatsApp group. The hand-curated
 bilingual message catalog was also replaced with the Google Cloud
 Translation API — see "Google Translate migration" below.
 
+**Broadcast further split into Individual + Group:** the WhatsApp
+Business API has no way to post directly into a group chat, so
+`SANGH_GROUP_WHATSAPP_NUMBER` (a blind env-var phone number) was replaced
+with `User.is_group_relay` — an admin-assignable flag on the Users tab.
+The daily broadcast now sends two distinct messages: **Individual**
+(personalized, to every opted-in user — today's community content plus
+what they/their family logged the previous day, plus their vow) and
+**Group** (community content only, no individual detail) sent to
+whichever user(s) are flagged as the relay, who forward it into the real
+group by hand. The admin's one-off custom group message follows the same
+relay-recipient list.
+
+**Flow simplification pass:** onboarding's broadcast opt-in and name
+collection were merged into one message/reply ("YES Bhavesh Shah" / "NO
+Bhavesh Shah") — a low-stakes preference paired with something needed
+either way — cutting one round trip without touching the two steps that
+carry real consent disclosures (personal features, public recognition),
+which stay separate. The WhatsApp menu's "log for a family member" option
+was folded into the fast/reflection flows themselves (each now asks "who
+is this for?" right after), removing a menu option and a layer of
+sub-menu navigation. The admin Content tab's broadcast forms no longer
+ask for a day number — it's derived from the date, removing a field that
+could silently drift between the Individual and Group forms for the same
+day.
+
 **Also been through a full code-review pass** (10 confirmed findings, all
 fixed — privacy-consent enforcement, a timezone bug, blocking I/O on the
 event loop, a duplicate-send risk, an unhandled crash on a webhook race,
@@ -56,15 +81,19 @@ shared login, per CLAUDE.md (no per-admin accounts). If either is unset,
   admins add an English candidate vow (auto-translated), then approve or
   delete it from the pending list before it can ever be assigned to a
   user.
-- **Users** — list with opt-in flags; drill into one user's fasting logs
-  and reflections, plus any family members they've logged on behalf of
-  and those members' own logs (per CLAUDE.md, this personal data being
-  visible here to admins is a deliberate disclosed design choice, not a
-  leak).
+- **Users** — list with opt-in flags and a toggle for the group-relay
+  role (`is_group_relay` — who receives the Group broadcast to manually
+  forward into the real Sangh WhatsApp group); drill into one user's
+  fasting logs and reflections, plus any family members they've logged
+  on behalf of and those members' own logs (per CLAUDE.md, this personal
+  data being visible here to admins is a deliberate disclosed design
+  choice, not a leak).
 - **Broadcast** — today's content previewed in both languages, with a
   "Send now" button that calls the same `send_daily_broadcast` the
-  Railway cron job uses, plus a form to send a one-off custom message
-  (English, auto-translated) to the Sangh WhatsApp group immediately.
+  Railway cron job uses (sends the personalized Individual message to
+  every opted-in user, and the community-only Group message to whoever
+  is flagged as the relay), plus a form to send a one-off custom message
+  (English, auto-translated) to the current relay recipient(s) immediately.
 
 See [`app/admin/`](app/admin/) (routes + auth) and
 [`app/templates/admin/`](app/templates/admin/).
@@ -81,12 +110,13 @@ Once onboarding is complete, a message is routed one of two ways:
   anytime" wording. Runs on Claude via LiteLLM (not Gemini — see the eval
   loop section below for why).
 - **`ANTHROPIC_API_KEY` unset** (default) → falls back to a deterministic
-  numbered menu (reply 1/2/3/4, or MENU): log a fast (type + optional
-  note), add a reflection, log for a family member (same two flows, under
-  a name you provide once and reuse thereafter), or toggle the daily vow
-  — no LLM involved. This is also the automatic fallback if the agent call
-  errors or times out (10s budget — see `app/agent_runtime.py` — Twilio's
-  own webhook timeout is ~15s).
+  numbered menu (reply 1/2/3, or MENU): log a fast (type + optional note),
+  add a reflection, or toggle the daily vow — no LLM involved. Both
+  logging flows ask "who is this for?" right after (reply YOU, or a
+  family member's name, reused thereafter) rather than routing family
+  logging through a separate menu option. This is also the automatic
+  fallback if the agent call errors or times out (10s budget — see
+  `app/agent_runtime.py` — Twilio's own webhook timeout is ~15s).
 
 Both paths gate fast/reflection/family-member logging behind
 `personal_opt_in` — opted-out users get a notice instead — but the menu
@@ -115,7 +145,7 @@ menu's messages always agree.
 
 ### Daily vow feature
 
-Users can opt in (menu option 4, or "toggle the vow" via the agent) to
+Users can opt in (menu option 3, or "toggle the vow" via the agent) to
 receive one Jain-principle vow each morning, appended to their daily
 broadcast. Candidate vows are admin-gated: [`scripts/seed_vows.py`](scripts/seed_vows.py)
 seeds ~25 starter English vows (auto-translated), all unapproved by
@@ -168,7 +198,6 @@ cp .env.example .env
 Fill in `.env`:
 - `TWILIO_ACCOUNT_SID` / `TWILIO_AUTH_TOKEN` — from the Twilio Console
 - `TWILIO_WHATSAPP_NUMBER` — defaults to the shared Sandbox number `whatsapp:+14155238886`
-- `SANGH_GROUP_WHATSAPP_NUMBER` — the existing Sangh WhatsApp group's number, if you want the daily broadcast to also post there
 - Leave `SKIP_TWILIO_SIGNATURE_VALIDATION=false` except for local testing without a real Twilio account
 - `ANTHROPIC_API_KEY` — optional. Get a key at https://console.anthropic.com/settings/keys to enable the free-form ADK agent (step 5); leave blank to use the deterministic menu only. If your key is identity-linked rather than workspace-scoped, also set `ANTHROPIC_WORKSPACE_ID` (Anthropic's API will tell you via a "workspace-id required" error if so)
 - `GOOGLE_TRANSLATE_API_KEY` — optional. Create a GCP project, enable the Cloud Translation API, then create an API key under Credentials; leave blank to have all Gujarati messages fall back to English untranslated (see "Google Translate migration" above)
@@ -198,29 +227,34 @@ The webhook is served at `POST /webhook/twilio`; health check at `GET /healthz`.
 3. In the Twilio Console, set the Sandbox's "When a message comes in" webhook to `https://<your-ngrok-domain>/webhook/twilio` (HTTP POST).
 4. Message the Sandbox number from WhatsApp — you should get the greeting and language prompt, then can walk through onboarding.
 
-## Seeding a day's broadcast content
+## Seeding broadcast content
 
-The admin dashboard's Content tab (Build Order step 6) doesn't exist yet.
-Until then, seed a day's broadcast manually:
+The admin dashboard's Content tab has two sections — Daily individual
+broadcast message and Daily group broadcast messages (one row per
+Paryushan day, English only; Gujarati is auto-drafted via Google
+Translate at send time) — each editable directly there. To avoid starting
+from a blank form for all 16 messages, seed a draft set for all 8 days:
 
 ```bash
-uv run python -m scripts.seed_broadcast \
-  --date 2026-09-08 --day-number 1 \
-  --theme-en "Compassion" --theme-gu "કરુણા" \
-  --pratikraman-timing "7:00 PM" \
-  --announcements-en "Please arrive 15 min early." \
-  --announcements-gu "કૃપા કરી 15 મિનિટ વહેલા આવો."
+uv run python -m scripts.seed_paryushan_broadcasts
 ```
 
-Then send it (this is what the Railway cron job runs daily in production):
+Drafts only — review and edit each one (Pratikraman timing especially,
+which is seeded as an explicit placeholder) before relying on them.
+Safe to re-run: skips any date that already has content, so it won't
+clobber edits already made.
+
+Then send today's (this is what the Railway cron job runs daily in production):
 
 ```bash
 uv run python -m scripts.run_daily_broadcast
 ```
 
-It sends to every user with `broadcast_opt_in=true`, in their chosen
-language, plus the Sangh group number if configured. It's a no-op (logs a
-warning) if no broadcast content has been seeded for the current date.
+It sends the personalized Individual message to every user with
+`broadcast_opt_in=true`, in their chosen language, plus the community-only
+Group message to whoever is flagged `is_group_relay` on the Users tab.
+It's a no-op (logs a warning) if no broadcast content has been seeded for
+the current date.
 
 ## Tests
 

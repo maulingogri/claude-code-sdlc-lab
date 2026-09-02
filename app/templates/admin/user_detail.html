@@ -2,8 +2,9 @@
 {% block title %}{{ user.phone }}{% endblock %}
 {% block content %}
 <p><a class="row-link" href="/admin/users">&larr; All users</a></p>
-<h2>{{ user.phone }}</h2>
+<h2>{{ user.display_name or user.phone }} <span class="badge faq">Head</span></h2>
 <p class="muted">
+  phone={{ user.phone }} ·
   language={{ user.language or '—' }} · broadcast_opt_in={{ user.broadcast_opt_in }} ·
   personal_opt_in={{ user.personal_opt_in }} · public_recognition_optin={{ user.public_recognition_optin }} ·
   vow_opt_in={{ user.vow_opt_in }} ·
@@ -41,7 +42,7 @@
 {% endif %}
 {% for dep in user.dependents %}
   <div class="card">
-    <strong>{{ dep.name }}</strong>
+    <strong>{{ dep.name }}</strong> <span class="badge answered">Member</span>
     <p class="muted">Fasting logs ({{ dep.fasting_logs|length }})</p>
     {% if dep.fasting_logs %}
     <table>

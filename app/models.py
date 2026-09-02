@@ -18,6 +18,14 @@ class User(Base):
     # Opts into receiving a random, admin-approved Jain-principle vow each
     # morning alongside the daily broadcast (see Vow/VowAssignment below).
     vow_opt_in: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Admin-assigned role (Users tab): this user receives the separate
+    # Group broadcast (community update, no individual fasting/vow detail)
+    # so they can manually relay it into the real Sangh WhatsApp group —
+    # the WhatsApp Business API has no way to post into a group chat
+    # directly, so a human relay is the only option. Independent of
+    # broadcast_opt_in: being the relay is an assigned role, not a
+    # personal content preference.
+    is_group_relay: Mapped[bool] = mapped_column(Boolean, default=False)
     # Not in the CLAUDE.md schema; added because the daily broadcast needs a
     # name to display for users who opt into fasting recognition.
     display_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
@@ -172,15 +180,26 @@ class TranslationCache(Base):
 
 
 class Broadcast(Base):
+    """One row per Paryushan day, holding two independently-drafted
+    English messages — Gujarati is auto-drafted via Google Translate at
+    send time (app/translation.py), same as vows and the ad-hoc group
+    message, rather than hand-curated per entry.
+
+    - individual_message_en: the fixed intro every opted-in user gets;
+      the recognition list, that user's own/family fasting activity, and
+      their daily vow are appended automatically per recipient — they
+      can't be part of one static draft (see app/broadcast.py).
+    - group_message_en: sent as-is (plus its Gujarati translation) to
+      whoever is flagged the group relay (User.is_group_relay), for
+      manual reposting into the real Sangh WhatsApp group.
+    """
+
     __tablename__ = "broadcasts"
 
     id: Mapped[int] = mapped_column(primary_key=True)
     date: Mapped[datetime.date] = mapped_column(Date, nullable=False, unique=True)
     day_number: Mapped[int] = mapped_column(nullable=False)
-    theme_en: Mapped[str] = mapped_column(String(255), nullable=False)
-    theme_gu: Mapped[str] = mapped_column(String(255), nullable=False)
-    pratikraman_timing: Mapped[str] = mapped_column(String(64), nullable=False)
-    announcements_en: Mapped[str | None] = mapped_column(Text, nullable=True)
-    announcements_gu: Mapped[str | None] = mapped_column(Text, nullable=True)
+    individual_message_en: Mapped[str] = mapped_column(Text, default="")
+    group_message_en: Mapped[str] = mapped_column(Text, default="")
     message_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     sent_at: Mapped[datetime.datetime | None] = mapped_column(DateTime, nullable=True)

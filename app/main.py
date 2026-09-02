@@ -140,8 +140,14 @@ async def twilio_webhook(request: Request) -> Response:
     finally:
         session.close()
 
+    # WhatsApp doesn't guarantee display order for multiple <Message> verbs
+    # returned in one TwiML response (each becomes a separate outbound send
+    # with no ordering guarantee between them — confirmed live: the
+    # broadcast-opt-in prompt arrived before its own "we'll continue in
+    # English" acknowledgment). Joining into a single message guarantees
+    # order by construction: there's only ever one bubble to deliver.
     twiml = MessagingResponse()
-    for reply in replies:
-        twiml.message(reply)
+    if replies:
+        twiml.message("\n\n".join(replies))
 
     return Response(content=str(twiml), media_type="application/xml")
