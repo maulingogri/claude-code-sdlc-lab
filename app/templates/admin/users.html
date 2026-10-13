@@ -1,0 +1,53 @@
+{% extends "admin/base.html" %}
+{% block title %}Users{% endblock %}
+{% block content %}
+<h2>Main Users settings ({{ users|length }})</h2>
+<table>
+  <thead><tr><th>Name</th><th>Role</th><th>Phone</th><th>Language</th><th>Broadcast</th><th>Personal</th><th>Recognition</th><th>Group relay</th><th>Onboarding</th></tr></thead>
+  <tbody>
+    {% for u in users %}
+    <tr>
+      <td><a class="row-link" href="/admin/users/{{ u.id }}">{{ u.display_name or '—' }}</a></td>
+      <td><span class="badge faq">Head</span></td>
+      <td>{{ u.phone }}</td>
+      <td>{{ u.language or '—' }}</td>
+      <td>{{ 'Yes' if u.broadcast_opt_in else 'No' }}</td>
+      <td>{{ 'Yes' if u.personal_opt_in else 'No' }}</td>
+      <td>{{ 'Yes' if u.public_recognition_optin else 'No' }}</td>
+      <td>
+        {% if u.is_group_relay %}<span class="badge answered">Relay</span>{% endif %}
+        <form method="post" action="/admin/users/{{ u.id }}/toggle-group-relay" class="inline" style="display:inline">
+          <button type="submit" class="secondary" style="margin:0;padding:2px 8px;font-size:12px;">{{ 'Unset' if u.is_group_relay else 'Make relay' }}</button>
+        </form>
+      </td>
+      <td>{{ u.onboarding_step }}</td>
+    </tr>
+    {% else %}
+    <tr><td colspan="9" class="empty">No users yet.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<h3>Members</h3>
+{% set roster = [] %}
+{% for u in users %}
+  {% set _ = roster.append((u, 'Head', u)) %}
+  {% for dep in u.dependents %}{% set _ = roster.append((dep, 'Member', u)) %}{% endfor %}
+{% endfor %}
+{% if not roster %}
+  <div class="empty">No members yet.</div>
+{% else %}
+<table>
+  <thead><tr><th>Name</th><th>Role</th><th>Head of household</th></tr></thead>
+  <tbody>
+    {% for person, role, head in roster %}
+    <tr>
+      <td>{{ (person.display_name or '—') if role == 'Head' else person.name }}</td>
+      <td><span class="badge {{ 'faq' if role == 'Head' else 'answered' }}">{{ role }}</span></td>
+      <td><a class="row-link" href="/admin/users/{{ head.id }}">{{ head.display_name or head.phone }}</a></td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+{% endblock %}

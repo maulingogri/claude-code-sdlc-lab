@@ -1,0 +1,113 @@
+{
+  "greeting": {
+    "en": "Jai Jinendra! Welcome to the Louisville Jain Sangh Paryushan companion. Let's get you set up."
+  },
+  "ask_language": {
+    "en": "Which language would you like to use?\nReply 1 for English\nReply 2 for ગુજરાતી"
+  },
+  "language_confirmed": {
+    "en": "Great, we'll continue in {language_name}."
+  },
+  "invalid_language_choice": {
+    "en": "Sorry, I didn't understand that. Please reply 1 for English or 2 for ગુજરાતી."
+  },
+  "ask_broadcast_optin": {
+    "en": "Would you like to receive daily Paryushan updates (Pratikraman timings, announcements)? And what's your name, for the Sangh's records?\n\nReply like this: YES Bhavesh Shah (or NO Bhavesh Shah if you don't want daily updates)"
+  },
+  "invalid_broadcast_optin_and_name": {
+    "en": "Sorry, I didn't quite get that. Please reply like this: YES Bhavesh Shah (or NO Bhavesh Shah)"
+  },
+  "broadcast_optin_yes_ack": {
+    "en": "Wonderful, {name} — you're subscribed to daily updates."
+  },
+  "broadcast_optin_no_ack": {
+    "en": "No problem, {name} — you won't receive daily broadcast updates. You can still use personal features."
+  },
+  "ask_personal_optin": {
+    "en": "Would you like to use personal features — a fasting (tapasya) log and private reflections?\n\nPlease note: Sangh admins can view this personal data through the admin dashboard for community coordination purposes. It is not fully private.\n\nReply YES or NO"
+  },
+  "personal_optin_yes_ack": {
+    "en": "Great — you can now log fasts and reflections any time by messaging me."
+  },
+  "personal_optin_no_ack": {
+    "en": "Understood, personal features are off. You can turn them on later by asking me."
+  },
+  "ask_public_recognition_optin": {
+    "en": "One more thing — each morning we share the names of those who fasted the previous day in the daily group announcement, as a form of community recognition.\n\nWould you like your name included when you fast? (This is separate and optional — off by default.)\n\nReply YES or NO"
+  },
+  "public_recognition_yes_ack": {
+    "en": "Got it — your name will be included in the fasting recognition list when you log a fast."
+  },
+  "public_recognition_no_ack": {
+    "en": "Understood — your fasting will stay off the public list."
+  },
+  "ask_family_members": {
+    "en": "Do you look after any family members — a young child, an elder, or anyone else who won't message me directly — that you'll be logging fasts or daily vows for?\n\nReply with their name(s), separated by commas (e.g. \"Grandma Shah, Priya\"), or reply NONE if not."
+  },
+  "family_members_added_ack": {
+    "en": "Got it — I've added {names} as family members you can log for."
+  },
+  "invalid_yes_no_choice": {
+    "en": "Sorry, please reply YES or NO."
+  },
+  "onboarding_complete": {
+    "en": "Onboarding complete! I'll be here throughout Paryushan (Sept 8-15) for daily updates and to log your fasts or reflections whenever you're ready. Jai Jinendra!"
+  },
+  "post_onboarding_menu": {
+    "en": "What would you like to do?\n1. Log a fast (for you or a family member)\n2. Add a reflection (for you or a family member)\n3. Daily vow — currently {vow_status}\n\nReply with a number, or CANCEL to stop a step in progress."
+  },
+  "personal_features_off_notice": {
+    "en": "You opted out of personal features during setup, so I can't log fasts or reflections for you. Message the Sangh admin if you'd like this turned on."
+  },
+  "ask_fast_type": {
+    "en": "What type of fast did you do? (e.g. Upvas, Ekasana, Biyasana, Ayambil — or describe your own)"
+  },
+  "ask_fast_note": {
+    "en": "Would you like to add a note? Reply with a note, or type SKIP."
+  },
+  "fast_logged_ack": {
+    "en": "Fast logged for today ({fast_type}). Thank you for your tapasya!"
+  },
+  "ask_reflection_text": {
+    "en": "Please share your reflection — I'll save it privately."
+  },
+  "reflection_saved_ack": {
+    "en": "Reflection saved. Thank you for sharing."
+  },
+  "ask_for_whom": {
+    "en": "Is this for you, or a family member? Reply YOU, or their name (e.g. Grandma Shah)."
+  },
+  "family_fast_logged_ack": {
+    "en": "Fast logged for {name} today ({fast_type}). Thank you!"
+  },
+  "family_reflection_saved_ack": {
+    "en": "Reflection saved for {name}. Thank you for sharing."
+  },
+  "vow_opt_in_on_ack": {
+    "en": "Done — you'll receive a daily vow along with your morning updates."
+  },
+  "vow_opt_in_off_ack": {
+    "en": "Done — you won't receive daily vows anymore. Reply 3 anytime to turn them back on."
+  },
+  "daily_vow_section": {
+    "en": "\n\nToday's vow: {vow_text}"
+  },
+  "flow_cancelled": {
+    "en": "Okay, cancelled. Type MENU anytime to see your options."
+  },
+  "invalid_menu_choice": {
+    "en": "Sorry, I didn't understand that. Reply 1 to log a fast, 2 for a reflection, 3 for the daily vow, or MENU to see this again."
+  },
+  "daily_broadcast_recognition": {
+    "en": "\n\nYesterday's tapasya (fasting) recognition: {names}"
+  },
+  "individual_activity_summary": {
+    "en": "\n\nYesterday's tapasya log for you and your family:\n{entries}"
+  },
+  "agent_error_fallback": {
+    "en": "That's taking longer than usual — it may have already gone through. If you don't see a confirmation shortly, please send it again."
+  },
+  "escalation_ack": {
+    "en": "Great question — let me check with the Sangh and get back to you soon."
+  }
+}

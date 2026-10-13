@@ -1,0 +1,40 @@
+{% extends "admin/base.html" %}
+{% block title %}Inbox{% endblock %}
+{% block content %}
+<h2>Inbox</h2>
+
+<h3>Pending ({{ pending|length }})</h3>
+{% if not pending %}
+  <div class="empty">No pending questions.</div>
+{% endif %}
+{% for e in pending %}
+  <div class="card">
+    <div><span class="badge pending">Pending</span> <span class="muted">{{ e.timestamp.strftime('%Y-%m-%d %H:%M UTC') }} — {{ e.user.phone }} ({{ e.user.language or 'en' }})</span></div>
+    <p><strong>{{ e.question_text }}</strong></p>
+    <form method="post" action="/admin/inbox/{{ e.id }}/reply" class="inline">
+      <label for="answer-{{ e.id }}">Reply</label>
+      <textarea id="answer-{{ e.id }}" name="answer_text" rows="3" required placeholder="Sent to the user via WhatsApp"></textarea>
+      <button type="submit">Send reply</button>
+    </form>
+  </div>
+{% endfor %}
+
+<h3>Answered ({{ answered|length }})</h3>
+{% if not answered %}
+  <div class="empty">No answered questions yet.</div>
+{% endif %}
+{% for e in answered %}
+  <div class="card">
+    <div>
+      <span class="badge answered">Answered</span>
+      {% if e.added_to_faq %}<span class="badge faq">In FAQ</span>{% endif %}
+      <span class="muted">{{ e.timestamp.strftime('%Y-%m-%d %H:%M UTC') }} — {{ e.user.phone }} ({{ e.user.language or 'en' }})</span>
+    </div>
+    <p><strong>Q:</strong> {{ e.question_text }}</p>
+    <p><strong>A:</strong> {{ e.answer_text }}</p>
+    {% if not e.added_to_faq %}
+      <a class="row-link" href="/admin/inbox/{{ e.id }}/add-to-faq"><button type="button" class="secondary">Add to FAQ</button></a>
+    {% endif %}
+  </div>
+{% endfor %}
+{% endblock %}

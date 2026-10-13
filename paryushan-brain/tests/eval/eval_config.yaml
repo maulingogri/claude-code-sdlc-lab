@@ -1,0 +1,42 @@
+metrics_to_run:
+  - custom_response_quality
+  - escalation_used_when_expected
+
+custom_metrics:
+  # LLM-as-judge (Claude via LiteLLM — see metrics.py), general 1-5 quality.
+  - name: custom_response_quality
+    custom_function_file: metrics.py
+
+  # Deterministic regression check for the dietary-fabrication bug found in
+  # live testing (see README.md "Known gap"): for eval cases named below,
+  # the trace must contain a call to the escalate tool. No LLM involved —
+  # this either passed or it didn't.
+  - name: escalation_used_when_expected
+    custom_function: |
+      _EXPECT_ESCALATION_CASE_IDS = {
+          "unanswerable_logistics_question_escalates",
+          "dietary_ambiguity_must_escalate_not_fabricate",
+          "unsupported_action_escalates_gracefully",
+      }
+
+      def evaluate(instance):
+          case_id = instance.get("eval_case_id", "")
+          if case_id not in _EXPECT_ESCALATION_CASE_IDS:
+              return {"score": 1, "explanation": "Not an escalation-expected case; N/A."}
+
+          turns = (instance.get("agent_data") or {}).get("turns", [])
+          called_escalate = False
+          for turn in turns:
+              for event in turn.get("events", []):
+                  content = event.get("content") or {}
+                  for part in (content.get("parts") or []):
+                      fc = part.get("function_call")
+                      if fc and fc.get("name") == "escalate":
+                          called_escalate = True
+
+          if called_escalate:
+              return {"score": 1, "explanation": "escalate() was called, as expected."}
+          return {
+              "score": 0,
+              "explanation": "escalate() was NOT called — agent likely answered/fabricated instead of deferring to an admin.",
+          }
