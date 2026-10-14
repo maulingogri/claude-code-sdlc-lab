@@ -1,6 +1,6 @@
 # Baseline — 2026-10-13, before CLAUDE.md / settings / hooks
 
-Environment: macOS, Python 3.11, uv, Claude Code v2.1.287  ← fill from `claude --version`
+Environment: macOS, Python 3.11, uv, Claude Code v2.1.287
 
 Scope: root `tests/` only. `paryushan-brain/` has its own tests and evals; out of scope for this lab.
 
